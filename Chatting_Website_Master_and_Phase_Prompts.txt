@@ -1,0 +1,571 @@
+PROJECT: REAL-TIME CHATTING WEBSITE
+Complete Master Prompt + Phase-by-Phase Prompts
+================================================
+
+PROJECT OVERVIEW
+----------------
+Build a secure, responsive, real-time, one-to-one text chatting website using React and FastAPI.
+
+Initial scope:
+- Signup using email address and password.
+- Verify email ownership using a one-time password (OTP) sent by email.
+- Login securely.
+- Search for registered users by exact email address.
+- Start private one-to-one conversations.
+- Send and receive text messages in real time.
+- Store messages in PostgreSQL so chat history remains available.
+- Allow users to give contacts custom names that only they can see.
+- Logout securely.
+- Make the website installable on supported laptop and mobile browsers as a Progressive Web App (PWA).
+
+IMPORTANT: Image and file sharing are NOT part of the initial implementation. Add image sharing later in a separate phase without breaking existing features.
+
+RECOMMENDED TECHNOLOGY STACK
+----------------------------
+Frontend:
+- React
+- Vite
+- JavaScript
+- React Router
+- Axios or Fetch API
+- Responsive CSS
+- vite-plugin-pwa
+
+Backend:
+- Python
+- FastAPI
+- Uvicorn
+- SQLAlchemy 2.0
+- Pydantic
+- Alembic for database migrations
+- PostgreSQL
+- WebSockets for real-time messaging
+- SMTP for verification emails
+- Secure authentication using either JWT with an appropriate delivery mechanism or secure server-side sessions
+
+Testing:
+- Pytest
+- FastAPI TestClient or HTTPX
+- Appropriate frontend testing tools
+
+Use compatible, stable package versions and provide exact installation commands.
+
+================================================
+PART 1 — MASTER PROMPT
+================================================
+
+Copy and give this prompt to your AI coding assistant first:
+
+Act as a senior full-stack software engineer and software architect. Help me build a complete, secure, real-time chatting website using React and FastAPI.
+
+I am learning backend development, so explain the code and implementation step by step. Do not generate the entire project in one response. We will develop it in separate phases and test each phase before moving to the next.
+
+1. PROJECT OBJECTIVE
+
+Build a private, one-to-one text messaging application where users can:
+- Register using their email address and password.
+- Verify their email address using an OTP sent to their inbox.
+- Log in securely.
+- Search for other registered users by their exact email address.
+- Start a private conversation with another registered user.
+- Send and receive text messages in real time.
+- View previous messages after logging in again.
+- Give contacts custom names that only they can see.
+- Log out securely.
+- Install the application on supported desktop and mobile devices as a Progressive Web App (PWA).
+
+Image sharing is excluded from the initial implementation. We will add it later without breaking existing architecture.
+
+2. REQUIRED TECHNOLOGY STACK
+
+Frontend:
+- React
+- Vite
+- JavaScript
+- React Router
+- Axios or Fetch API
+- Responsive CSS
+- vite-plugin-pwa
+
+Backend:
+- Python
+- FastAPI
+- Uvicorn
+- SQLAlchemy 2.0
+- Pydantic
+- Alembic
+- PostgreSQL
+- WebSockets
+- Secure authentication using JWT with a suitable delivery mechanism or secure server-side sessions
+- SMTP for email verification
+
+Testing:
+- Pytest
+- FastAPI TestClient or HTTPX
+- Frontend testing tools where appropriate
+
+3. BACKEND ARCHITECTURE
+
+Follow a clean layered architecture:
+
+- routers: HTTP endpoints and WebSocket routes
+- services: business logic
+- repositories: database operations
+- models: SQLAlchemy database models
+- schemas: Pydantic request and response schemas
+- core: configuration, security, and authentication utilities
+- db: database engine, session management, and base model
+- websockets: connection management and real-time message delivery
+
+Dependency flow:
+Router -> Service -> Repository -> Database
+
+Services should not contain unnecessary SQL queries, and routers should not contain business logic. Use dependency injection for database sessions and authenticated users.
+
+4. DATABASE REQUIREMENTS
+
+Create relational database tables for:
+- users
+- email_otps
+- conversations
+- conversation_participants
+- messages
+- contacts
+
+Use appropriate primary keys, foreign keys, unique constraints, indexes, and timestamps.
+
+Requirements:
+- Email addresses must be unique and consistently normalized.
+- Passwords must be stored as secure password hashes, never as plain text.
+- Unverified accounts must not be allowed to use the chat.
+- OTP records must expire and cannot be reused.
+- Private conversations must have exactly two participants.
+- The same pair of users must not accidentally create duplicate conversations.
+- A message must belong to an existing conversation and an authenticated sender who participates in it.
+- Custom contact names must be private to the user who sets them.
+- Messages must persist in PostgreSQL.
+- Use Alembic migrations rather than automatic table creation in production.
+
+Explain the relationships between all tables and why junction tables are required.
+
+5. SECURITY REQUIREMENTS
+
+Implement:
+- Secure password hashing.
+- Authentication and authorization for protected routes.
+- OTP expiry, attempt limits, resend cooldowns, and rate limiting.
+- Safe handling of environment variables and secrets.
+- Input validation.
+- Protection against unauthorized conversation access.
+- WebSocket authentication and conversation membership checks.
+- Safe CORS configuration.
+- Secure session or token handling.
+- Appropriate database transaction handling.
+- Generic authentication errors where necessary to reduce account enumeration.
+- Logout and session/token expiration handling.
+
+Never expose passwords, OTP secrets, email credentials, or authentication tokens in logs or frontend source code.
+
+6. FRONTEND REQUIREMENTS
+
+Build a clean, modern, responsive interface with:
+- Signup page.
+- OTP verification page.
+- Login page.
+- Main chat dashboard.
+- Registered-user search.
+- Contact list.
+- Private chat window.
+- Message input and send button.
+- Loading indicators.
+- Error messages.
+- Empty states.
+- Logout option.
+- Mobile-friendly navigation.
+
+Use reusable React components, sensible folder organization, form validation, and a centralized API client. The frontend must communicate with FastAPI through HTTP APIs and authenticated WebSockets.
+
+7. REAL-TIME MESSAGING REQUIREMENTS
+
+Use WebSockets for real-time delivery.
+
+The backend must:
+- Authenticate each connection.
+- Verify that the user belongs to the requested conversation.
+- Validate each message.
+- Save a message to PostgreSQL before confirming successful sending.
+- Deliver the message to the authorized recipient.
+- Handle disconnected users.
+- Clean up closed connections.
+- Support reconnecting and loading missed messages through the message-history API.
+
+Do not rely on WebSockets alone for message persistence.
+
+8. CONTACT RENAMING
+
+Implement a contacts table with:
+- owner_user_id
+- contact_user_id
+- custom_name
+- created_at
+- updated_at
+
+A custom name belongs to the user who sets it. For example, if Ali renames Ahmed to "Best Friend", only Ali should see that label. Ahmed's account name and other users' views must not change.
+
+Allow a user to create, update, and reset a custom name.
+
+9. PWA REQUIREMENTS
+
+Configure the React frontend as an installable Progressive Web App.
+
+Include:
+- Web app manifest.
+- Application name and icons.
+- Theme and background colors.
+- Appropriate display mode.
+- Installation support where browsers allow it.
+- Responsive layouts for desktop, tablet, and mobile.
+- A service worker for suitable static assets.
+
+Do not cache private messages, authentication responses, or sensitive API data in an unsafe way. Explain that installation and notification capabilities differ across operating systems and browsers. A PWA is not automatically an APK or Windows executable.
+
+10. DEVELOPMENT RULES
+
+- Build the project incrementally.
+- Start with environment setup and project structure.
+- Show the exact folder tree.
+- Provide complete code for every file introduced in a phase.
+- State each file's path before its code.
+- Include installation commands.
+- Explain what each important file does.
+- Provide .env.example but never include real secrets.
+- Include commands to run the frontend and backend.
+- Include API testing examples.
+- Explain how to test using Swagger UI.
+- Diagnose errors using their actual messages rather than guessing.
+- Do not silently omit required code or use placeholder functions for core features.
+- Keep existing code consistent when introducing new phases.
+- Avoid unnecessary abstractions and dependencies.
+- Add automated tests for important behavior.
+- Do not proceed to the next phase until the current phase has been reviewed and tested.
+
+11. EXCLUDED FEATURES FOR NOW
+
+Do not implement:
+- Image or file uploads.
+- Group chats.
+- Audio or video calls.
+- Payments.
+- Social login.
+- AI chatbots.
+- Unnecessary microservices.
+
+Image sharing will be considered in a future phase.
+
+12. EXPECTED FINAL RESULT
+
+Deliver a working, maintainable, secure real-time chat application with React, FastAPI, PostgreSQL, email OTP verification, private text messaging, contact renaming, and PWA installation.
+
+Start by explaining the architecture and Phase 1 setup. Do not generate every phase at once.
+
+================================================
+PART 2 — PHASE-BY-PHASE PROMPTS
+================================================
+
+PHASE 1 — ENVIRONMENT SETUP AND PROJECT STRUCTURE
+-------------------------------------------------
+
+Prompt:
+
+Using the previously defined Real-Time Chat Application requirements, implement Phase 1 only.
+
+Tasks:
+1. Check the required Python, Node.js, npm, and PostgreSQL prerequisites and provide verification commands.
+2. Explain how to install any missing prerequisites on Windows.
+3. Create the React + Vite frontend.
+4. Create the FastAPI backend.
+5. Create the backend's layered folder structure: routers, services, repositories, models, schemas, core, db, and websockets.
+6. Create requirements.txt and package.json dependencies.
+7. Configure environment variables using .env and .env.example.
+8. Configure PostgreSQL and the SQLAlchemy database engine.
+9. Configure Alembic for future database migrations.
+10. Create a minimal FastAPI application and a React page that can run successfully.
+
+Provide the exact folder tree, file paths, complete code, terminal commands, and testing steps.
+
+Do not implement authentication, OTP, or messaging yet.
+
+At the end, verify that the frontend loads, FastAPI starts, the health endpoint works, and the backend can connect to PostgreSQL. Wait for my confirmation before proceeding.
+
+Expected result:
+React and FastAPI run successfully and the backend can connect to PostgreSQL.
+
+PHASE 2 — DATABASE MODELS AND RELATIONSHIPS
+-------------------------------------------
+
+Prompt:
+
+Implement Phase 2 of the Real-Time Chat Application using the existing codebase. Do not recreate the project from scratch.
+
+Create SQLAlchemy 2.0 models and Alembic migrations for:
+- User
+- EmailOTP
+- Conversation
+- ConversationParticipant
+- Message
+- Contact
+
+Requirements:
+1. Use UUID primary keys or another consistent identifier strategy.
+2. Add foreign keys, indexes, unique constraints, and timestamps.
+3. Ensure emails are unique and normalized consistently.
+4. Model private conversations using a conversation-participant junction table.
+5. Prevent duplicate membership records.
+6. Design a reliable strategy to prevent duplicate one-to-one conversations.
+7. Ensure each user's custom contact name is independent of the original user's name.
+8. Configure ORM relationships and cascading behavior carefully.
+9. Create and apply migrations.
+10. Explain every relationship, especially the many-to-many relationship implemented through a junction table.
+
+Provide complete code and commands. Test the models and database constraints. Do not implement signup or OTP endpoints yet. Wait for my confirmation.
+
+PHASE 3 — SIGNUP, GMAIL OTP, AND EMAIL VERIFICATION
+---------------------------------------------------
+
+Prompt:
+
+Implement Phase 3: secure signup and email OTP verification.
+
+Use the existing React, FastAPI, PostgreSQL, SQLAlchemy, and layered architecture.
+
+Backend requirements:
+1. Create POST /auth/signup.
+2. Validate the user's name, email, and password.
+3. Normalize the email and reject duplicate accounts safely.
+4. Hash the password securely.
+5. Generate a cryptographically secure six-digit OTP.
+6. Send the OTP through Gmail SMTP using credentials stored in environment variables.
+7. Store only a secure hash of the OTP, together with its expiration time, attempt count, and used status.
+8. Create an account in an appropriate pending/unverified state.
+9. Create POST /auth/verify-otp.
+10. Verify the OTP, reject expired or previously used codes, and mark the account verified.
+11. Implement resend cooldowns, attempt limits, and rate limiting.
+12. Handle email delivery failures and expired codes.
+13. Do not log OTP values or expose email credentials.
+14. Use Pydantic schemas, services, repositories, and router dependencies.
+
+Frontend requirements:
+- Signup form.
+- OTP entry screen.
+- Resend OTP option with a cooldown.
+- Loading and error states.
+- Success message and navigation to login.
+
+Explain how to configure a Gmail App Password, including the requirement for two-step verification and the difference between an account password and an App Password.
+
+Provide full code, .env.example, setup instructions, and tests for successful verification, invalid OTPs, expiration, duplicate emails, and resend limits.
+
+Do not implement login or chat yet. Wait for my confirmation.
+
+PHASE 4 — LOGIN, AUTHENTICATION, AND LOGOUT
+-------------------------------------------
+
+Prompt:
+
+Implement Phase 4: secure login, authentication, and logout in the existing project.
+
+Requirements:
+1. Create POST /auth/login.
+2. Authenticate using email and password.
+3. Reject invalid credentials and unverified accounts.
+4. Implement either secure server-side sessions or JWT authentication with an appropriate storage and delivery strategy. Explain the selected approach.
+5. For a browser-based PWA, prefer secure HttpOnly cookies where appropriate, with correct SameSite, Secure, CORS, and CSRF considerations.
+6. If JWT is used, implement expiration and a suitable logout/revocation strategy rather than pretending that deleting a frontend token invalidates it everywhere.
+7. Create a current-user endpoint such as GET /auth/me.
+8. Create POST /auth/logout.
+9. Protect all private API endpoints using FastAPI dependencies.
+10. Implement safe password verification and generic authentication errors.
+
+Frontend:
+- Login form.
+- Form validation.
+- Persistent authenticated state using the selected session strategy.
+- Protected routes.
+- Redirect users to login when unauthenticated.
+- Logout button.
+- Clear session-related frontend state after logout.
+
+Provide complete code and automated tests. Do not implement chat functionality yet. Wait for my confirmation.
+
+PHASE 5 — SEARCH REGISTERED USERS AND MANAGE CONTACTS
+----------------------------------------------------
+
+Prompt:
+
+Implement Phase 5: registered-user search and contact management.
+
+Requirements:
+1. Create GET /users/search?email=... .
+2. Search by normalized exact email address.
+3. Return only safe public profile fields.
+4. Never return password hashes, OTP records, tokens, or private account data.
+5. Require authentication and restrict results to verified users.
+6. Prevent users from creating conversations with themselves.
+7. Implement contact creation and listing if required by the selected UI.
+8. Implement PATCH /contacts/{contact_user_id} to set or update a custom contact name.
+9. Implement an endpoint to reset a custom name.
+10. Ensure custom names are private to the owner.
+11. Validate authorization, foreign keys, and duplicate contacts.
+12. Use the existing router-service-repository architecture.
+
+Frontend:
+- Search input.
+- Search results.
+- User profile/name display.
+- Add or open chat action.
+- Contact list.
+- Rename contact dialog.
+- Error, loading, and empty states.
+
+Provide complete code, API tests, and frontend testing instructions. Do not implement WebSocket messaging yet. Wait for confirmation.
+
+Important: A custom name changes only the contact-list display label. It must not change the other user's actual profile name.
+
+PHASE 6 — PRIVATE CONVERSATIONS AND TEXT MESSAGING
+--------------------------------------------------
+
+Prompt:
+
+Implement Phase 6: private one-to-one text messaging.
+
+Use the existing database models, authentication, contact management, and project architecture.
+
+Backend requirements:
+1. Create POST /chats to create or retrieve the existing private conversation for two authorized users.
+2. Ensure the same pair cannot create duplicate conversations.
+3. Create GET /chats to list the authenticated user's conversations.
+4. Create GET /chats/{conversation_id}/messages with pagination and stable ordering.
+5. Implement authenticated WebSocket connections for /ws/chats/{conversation_id}.
+6. Verify the user's identity and conversation membership before accepting or delivering messages.
+7. Validate message length and payload.
+8. Save each message to PostgreSQL before confirming successful sending.
+9. Deliver new messages to connected authorized participants.
+10. Handle disconnects, reconnects, connection cleanup, and delivery failures.
+11. Load previous messages from the database after reconnecting.
+12. Avoid claiming guaranteed delivery without implementing acknowledgments and recovery.
+13. Use database transactions and appropriate error handling.
+
+Frontend requirements:
+- Conversation list.
+- Chat window.
+- Message input.
+- Send button.
+- Real-time incoming messages.
+- Loading previous messages.
+- Connection and reconnection status.
+- Empty conversation state.
+- Responsive mobile layout.
+- Display custom contact names where applicable.
+
+Test with two separate accounts and two browser sessions.
+
+Provide complete code and tests. Do not implement image uploads or group chats. Wait for confirmation.
+
+PHASE 7 — PWA AND LAPTOP/MOBILE INSTALLATION
+--------------------------------------------
+
+Prompt:
+
+Implement Phase 7: make the existing React chat application an installable Progressive Web App.
+
+Requirements:
+1. Configure vite-plugin-pwa.
+2. Add a valid web app manifest, application name, theme color, and required application icons.
+3. Configure an appropriate standalone display mode.
+4. Make the entire UI responsive for laptop, desktop, tablet, and mobile.
+5. Add a suitable install prompt where supported.
+6. Explain installation through supported desktop browsers and Android browsers.
+7. Explain how users can add the app to the iPhone Home Screen through Safari.
+8. Configure the service worker to cache safe static assets only.
+9. Never cache private messages, credentials, or sensitive authenticated API responses unsafely.
+10. Ensure WebSocket and authentication behavior works correctly after installation.
+11. Explain the HTTPS requirement for deployed installations and the localhost development exception.
+12. Provide local testing and deployment instructions.
+
+Do not package the app as an APK or Windows executable in this phase. Do not implement image uploads. Preserve all existing features and test them after the PWA changes.
+
+PHASE 8 — FINAL TESTING AND DEPLOYMENT
+--------------------------------------
+
+Prompt:
+
+Implement Phase 8: end-to-end testing, security review, and deployment preparation for the existing chat application.
+
+Tasks:
+1. Add backend tests for signup, OTP verification, login, logout, user search, conversations, messages, and contact renaming.
+2. Add tests for unauthorized API access and WebSocket access.
+3. Test two different users communicating in real time.
+4. Test persistence after refreshing and logging out.
+5. Test responsive UI and PWA installation.
+6. Add appropriate structured logging without exposing secrets or private message content.
+7. Review rate limiting, password hashing, session security, CSRF protections where relevant, CORS, input validation, and database constraints.
+8. Provide production environment configuration using environment variables.
+9. Provide a Dockerfile and Docker Compose configuration if appropriate.
+10. Explain how to run the application locally and how to deploy it using providers with suitable free tiers.
+11. Explain HTTPS, database migrations, backups, email delivery limits, persistent storage, and free-tier limitations.
+12. Document API endpoints and provide a final project README.
+
+Do not claim that deployment is complete unless it has actually been performed. Provide complete files, commands, and a checklist to verify each requirement.
+
+================================================
+PART 3 — FUTURE PHASE: IMAGE SHARING
+================================================
+
+Do not use this prompt until text chat is complete and tested.
+
+Prompt:
+
+Implement image sharing as a separate feature in the existing chat application without breaking text messaging, authentication, conversation history, contact renaming, or PWA functionality.
+
+Requirements:
+- Choose a suitable image storage provider, such as Cloudinary or object storage, after explaining free-tier limitations.
+- Validate file size, MIME type, and actual file content.
+- Restrict uploads to authenticated users who belong to the target conversation.
+- Use secure upload permissions and avoid exposing provider secrets in the frontend.
+- Store image URLs and relevant metadata in PostgreSQL, not image binaries.
+- Add an appropriate message type or attachment model.
+- Display image previews and handle upload progress and errors.
+- Prevent unauthorized users from retrieving private images where applicable.
+- Add tests for valid images, invalid files, excessive size, and unauthorized uploads.
+- Explain local development and production configuration.
+
+Do not implement group chat, audio calls, or video calls.
+
+================================================
+PART 4 — RECOMMENDED DEVELOPMENT WORKFLOW
+================================================
+
+1. Send the Master Prompt to the AI assistant.
+2. Send only the Phase 1 prompt.
+3. Run the code and test it on your computer.
+4. Share any error messages with the AI assistant and fix them before continuing.
+5. After Phase 1 works, send Phase 2.
+6. Continue one phase at a time through Phase 8.
+7. Add the Image Sharing prompt only after the text chat is stable.
+
+After each phase, use this follow-up prompt if needed:
+
+"Review the current phase against every requirement. List what is implemented, what is missing, and any security or testing issues. Fix the current phase only. Provide complete code for changed files and exact commands to test it. Do not start the next phase until I confirm."
+
+GENERAL DEVELOPMENT NOTES
+-------------------------
+- React, FastAPI, PostgreSQL, SQLAlchemy, Pydantic, and WebSockets can be used without license fees, but hosting and third-party service free tiers have limits.
+- Gmail SMTP has account and sending limits. Use environment variables and never expose credentials.
+- A PWA can be installed on supported devices but is not automatically an APK or Windows .exe.
+- Public deployment normally requires HTTPS.
+- Free hosting plans can have restrictions on sleeping, storage, bandwidth, database size, and usage.
+- Keep all secrets out of source control.
+- Use .env.example as a template and keep the real .env file private.
+- Never store passwords or plaintext OTPs in the database.
+- Test with at least two separate user accounts to verify private messaging.
+- The initial project is text-only. Image storage is a future phase.
