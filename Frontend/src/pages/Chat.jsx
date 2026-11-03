@@ -244,7 +244,24 @@ export default function Chat() {
 
             if (isForActiveChat) {
               setMessages((prev) => {
+                // If real message already exists, do not duplicate
                 if (prev.some((m) => m.id === newMsg.id)) return prev
+
+                // If sent by me, reconcile with existing optimistic message
+                if (isFromMe) {
+                  const tempIndex = prev.findIndex(
+                    (m) =>
+                      String(m.id).startsWith('temp-') &&
+                      m.content === newMsg.content &&
+                      String(m.sender_id).toLowerCase() === String(newMsg.sender_id).toLowerCase()
+                  )
+                  if (tempIndex !== -1) {
+                    const next = [...prev]
+                    next[tempIndex] = { ...newMsg, is_mine: true }
+                    return next
+                  }
+                }
+
                 return [
                   ...prev,
                   {
@@ -334,24 +351,65 @@ export default function Chat() {
     }
   }, [activeConv?.id, user?.id])
 
-  // 4. Handle Sending a Message
+  // 4. Handle Sending a Message (Optimistic UI for Instant 0ms Feedback)
   const handleSendMessage = async (e) => {
     e.preventDefault()
     const content = inputText.trim()
     if (!content || !activeConv) return
 
+    // 1. Immediately clear input field
     setInputText('')
 
-    // Try WebSocket send first
+    // 2. Generate optimistic message for zero-latency screen display
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
+    const nowIso = new Date().toISOString()
+    const optimisticMsg = {
+      id: tempId,
+      conversation_id: activeConv.id,
+      sender_id: user?.id,
+      sender_name: user?.full_name,
+      content: content,
+      created_at: nowIso,
+      is_read: false,
+      is_mine: true,
+      pending: true,
+    }
+
+    // 3. Immediately render in messages feed (0ms delay!)
+    setMessages((prev) => [...prev, optimisticMsg])
+
+    // 4. Immediately update sidebar snippet & move chat to top
+    setConversations((prev) => {
+      const updated = prev.map((c) => {
+        if (c.id === activeConv.id) {
+          return {
+            ...c,
+            last_message: {
+              ...optimisticMsg,
+              is_mine: true,
+            },
+            updated_at: nowIso,
+          }
+        }
+        return c
+      })
+      return [...updated].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
+    })
+
+    // 5. Send via WebSocket (or fallback REST)
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ content }))
+      wsRef.current.send(JSON.stringify({ content, temp_id: tempId }))
     } else {
-      // Fallback to REST API if WebSocket is offline
       try {
         const savedMsg = await sendMessageRest(activeConv.id, content)
-        setMessages((prev) => [...prev, { ...savedMsg, is_mine: true }])
+        setMessages((prev) =>
+          prev.map((m) => (m.id === tempId ? { ...savedMsg, is_mine: true } : m))
+        )
       } catch (err) {
-        alert('Failed to send message. Please check connection.')
+        console.error('Failed to send message via REST:', err)
+        setMessages((prev) =>
+          prev.map((m) => (m.id === tempId ? { ...m, failed: true } : m))
+        )
       }
     }
   }
