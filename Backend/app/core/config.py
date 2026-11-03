@@ -35,6 +35,19 @@ class Settings(BaseSettings):
     OTP_MAX_ATTEMPTS: int = 5
     OTP_RESEND_COOLDOWN_SECONDS: int = 60
 
+    @field_validator("CORS_ORIGINS", mode="before")
+    def parse_cors_origins(cls, v):
+        if isinstance(v, str):
+            cleaned = v.strip()
+            if cleaned.startswith("["):
+                import json
+                try:
+                    return json.loads(cleaned)
+                except Exception:
+                    pass
+            return [origin.strip() for origin in cleaned.split(",") if origin.strip()]
+        return v
+
     @field_validator("DATABASE_URL", mode="before")
     def assemble_db_connection(cls, v: str) -> str:
         if isinstance(v, str):

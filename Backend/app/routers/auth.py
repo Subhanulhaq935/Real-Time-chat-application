@@ -79,13 +79,14 @@ def login(
     token_resp, token_str, max_age = auth_service.login(data)
 
     # Attach secure HttpOnly cookie for PWA / browser security
+    is_prod = settings.APP_ENV != "development"
     response.set_cookie(
         key="access_token",
         value=token_str,
         max_age=max_age,
         httponly=True,
-        samesite="lax",
-        secure=settings.APP_ENV != "development",
+        samesite="none" if is_prod else "lax",
+        secure=is_prod,
     )
 
     return token_resp
@@ -122,11 +123,12 @@ def logout(
     logout_resp = auth_service.logout(payload)
 
     # Invalidate client-side HttpOnly cookie
+    is_prod = settings.APP_ENV != "development"
     response.delete_cookie(
         key="access_token",
         httponly=True,
-        samesite="lax",
-        secure=settings.APP_ENV != "development",
+        samesite="none" if is_prod else "lax",
+        secure=is_prod,
     )
 
     return logout_resp
