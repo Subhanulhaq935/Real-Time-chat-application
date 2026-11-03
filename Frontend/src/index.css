@@ -9,7 +9,10 @@ body {
   margin: 0;
   padding: 0;
   width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
   min-height: 100vh;
+  min-height: 100dvh;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
   background-color: var(--app-bg, #0b141a);
   color: var(--text-main, #f8fafc);
@@ -20,7 +23,10 @@ body {
 
 #root {
   width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   text-align: left;
