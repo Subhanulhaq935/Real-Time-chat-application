@@ -38,9 +38,8 @@ export default function Chat() {
 
   // Message edit & delete modals/state
   const [activeReactionMsgId, setActiveReactionMsgId] = useState(null)
+  const [activeMenuMsgId, setActiveMenuMsgId] = useState(null)
   const [editingMessage, setEditingMessage] = useState(null) // { id: str, content: str }
-  const [hoveredMsgId, setHoveredMsgId] = useState(null)
-  const [deleteModalMsg, setDeleteModalMsg] = useState(null) // { id: str, isMine: bool }
 
   // WebSocket state
   const [wsStatus, setWsStatus] = useState('disconnected') // 'connecting' | 'connected' | 'disconnected'
@@ -53,6 +52,7 @@ export default function Chat() {
   const typingTimeoutRef = useRef(null)
   const isTypingLocalRef = useRef(false)
   const messageItemRefs = useRef({})
+  const longPressTimerRef = useRef(null)
 
   useEffect(() => {
     activeConvRef.current = activeConv
@@ -67,14 +67,36 @@ export default function Chat() {
     setSearchParams({})
   }
 
-  // Close menus when clicking outside
+  // Close menus when clicking anywhere outside
   useEffect(() => {
     const handleGlobalClick = () => {
       setActiveReactionMsgId(null)
+      setActiveMenuMsgId(null)
     }
     window.addEventListener('click', handleGlobalClick)
     return () => window.removeEventListener('click', handleGlobalClick)
   }, [])
+
+  // Long press handler (press and hold message bubble to open reactions)
+  const startLongPress = (msgId) => {
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current)
+    longPressTimerRef.current = setTimeout(() => {
+      setActiveReactionMsgId(msgId)
+      setActiveMenuMsgId(null)
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        try {
+          navigator.vibrate(50)
+        } catch (e) {}
+      }
+    }, 450)
+  }
+
+  const cancelLongPress = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current)
+      longPressTimerRef.current = null
+    }
+  }
 
   // Format Last Seen Time
   const formatLastSeen = (lastSeenAt) => {
@@ -716,17 +738,21 @@ export default function Chat() {
     setEditingMessage(null)
   }
 
-  // 8. Handle Delete Message Submit
-  const handleExecuteDelete = async (deleteType) => {
-    if (!deleteModalMsg || !activeConv) return
-    const { id } = deleteModalMsg
+  // 8. Handle Delete Message Submit (Direct from 3-dots menu)
+  const handleExecuteDelete = async (deleteType, messageId) => {
+    if (!messageId || !activeConv) return
+
+    if (deleteType === 'everyone') {
+      const ok = window.confirm('Are you sure you want to delete this message for everyone?')
+      if (!ok) return
+    }
 
     if (deleteType === 'me') {
-      setMessages((prev) => prev.filter((m) => m.id !== id))
+      setMessages((prev) => prev.filter((m) => m.id !== messageId))
     } else {
       setMessages((prev) =>
         prev.map((m) =>
-          m.id === id
+          m.id === messageId
             ? { ...m, content: '🚫 This message was deleted', media_url: null, is_deleted_everyone: true }
             : m
         )
@@ -735,17 +761,15 @@ export default function Chat() {
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(
-        JSON.stringify({ type: 'delete_message', message_id: id, delete_type: deleteType })
+        JSON.stringify({ type: 'delete_message', message_id: messageId, delete_type: deleteType })
       )
     } else {
       try {
-        await deleteMessageRest(activeConv.id, id, deleteType)
+        await deleteMessageRest(activeConv.id, messageId, deleteType)
       } catch (err) {
         console.error('Delete failed:', err)
       }
     }
-
-    setDeleteModalMsg(null)
   }
 
   // Search matches
@@ -816,6 +840,8 @@ export default function Chat() {
     setShowMobileList(false)
     setIsSearching(false)
     setSearchQuery('')
+    setActiveReactionMsgId(null)
+    setActiveMenuMsgId(null)
     setConversations((prev) =>
       prev.map((c) => (c.id === conv.id ? { ...c, unread_count: 0 } : c))
     )
@@ -1054,9 +1080,8 @@ export default function Chat() {
                     m.is_mine === true ||
                     (user?.id && String(m.sender_id).toLowerCase() === String(user.id).toLowerCase())
                   )
-                  const isHovered = hoveredMsgId === m.id
-                  const isReactionActive = activeReactionMsgId === m.id
-                  const isReactionVisible = !m.is_deleted_everyone && (isHovered || isReactionActive)
+                  const isReactionOpen = activeReactionMsgId === m.id
+                  const isMenuOpen = activeMenuMsgId === m.id
                   const isEditingThis = editingMessage?.id === m.id
                   const isDeleted = m.is_deleted_everyone
 
@@ -1079,14 +1104,10 @@ export default function Chat() {
                     <div
                       key={m.id}
                       ref={(el) => (messageItemRefs.current[m.id] = el)}
-                      className={`message-bubble-row ${isMine ? 'outgoing' : 'incoming'} ${
-                        isReactionActive ? 'active-actions' : ''
-                      }`}
-                      onMouseEnter={() => setHoveredMsgId(m.id)}
-                      onMouseLeave={() => setHoveredMsgId(null)}
+                      className={`message-bubble-row ${isMine ? 'outgoing' : 'incoming'}`}
                     >
-                      {/* Floating Quick Reaction Bar */}
-                      {isReactionVisible && (
+                      {/* Floating Quick Reaction Bar (Triggered on Press & Hold / Double Click / Menu) */}
+                      {!isDeleted && isReactionOpen && (
                         <MessageReactionBar
                           onReact={(emoji) => handleToggleReaction(m.id, emoji)}
                           onClose={() => setActiveReactionMsgId(null)}
@@ -1097,43 +1118,21 @@ export default function Chat() {
                         className={`message-bubble ${isMine ? 'bubble-outgoing' : 'bubble-incoming'} ${
                           isDeleted ? 'bubble-deleted' : ''
                         }`}
+                        onMouseDown={() => startLongPress(m.id)}
+                        onMouseUp={cancelLongPress}
+                        onMouseLeave={cancelLongPress}
+                        onTouchStart={() => startLongPress(m.id)}
+                        onTouchEnd={cancelLongPress}
+                        onTouchMove={cancelLongPress}
+                        onContextMenu={(e) => {
+                          e.preventDefault()
+                          setActiveReactionMsgId(m.id)
+                          setActiveMenuMsgId(null)
+                        }}
+                        onDoubleClick={() => {
+                          setActiveReactionMsgId(m.id)
+                        }}
                       >
-                        {/* Clear Action Toolbar (React 😊, Edit ✏️, Delete 🗑️) */}
-                        {!isDeleted && (
-                          <div className="bubble-actions-toolbar" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              type="button"
-                              className="bubble-action-btn react-btn"
-                              onClick={() =>
-                                setActiveReactionMsgId((prev) => (prev === m.id ? null : m.id))
-                              }
-                              title="Add reaction"
-                            >
-                              😊
-                            </button>
-
-                            {isMine && m.message_type === 'text' && (
-                              <button
-                                type="button"
-                                className="bubble-action-btn edit-btn"
-                                onClick={() => setEditingMessage({ id: m.id, content: m.content })}
-                                title="Edit message"
-                              >
-                                ✏️
-                              </button>
-                            )}
-
-                            <button
-                              type="button"
-                              className="bubble-action-btn delete-btn"
-                              onClick={() => setDeleteModalMsg({ id: m.id, isMine })}
-                              title="Delete message"
-                            >
-                              🗑️
-                            </button>
-                          </div>
-                        )}
-
                         {!isMine && (
                           <div className="message-sender-label">
                             {otherParticipant?.display_name || m.sender_name}
@@ -1188,7 +1187,7 @@ export default function Chat() {
                           </div>
                         )}
 
-                        {/* Message Meta (Time, Edited tag, Ticks) */}
+                        {/* Message Meta (Time, Edited tag, Ticks, & 3-Dots Menu Button) */}
                         <div className="message-meta">
                           {m.is_edited && !isDeleted && (
                             <span className="edited-badge" title="Edited message">
@@ -1210,6 +1209,78 @@ export default function Chat() {
                             >
                               {m.is_read ? '✓✓' : '✓'}
                             </span>
+                          )}
+
+                          {/* 3-Dots Button on Right Bottom Corner */}
+                          {!isDeleted && (
+                            <div
+                              className="msg-corner-menu-wrapper"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <button
+                                type="button"
+                                className={`msg-corner-dots-btn ${isMenuOpen ? 'active' : ''}`}
+                                onClick={() => {
+                                  setActiveMenuMsgId(isMenuOpen ? null : m.id)
+                                  setActiveReactionMsgId(null)
+                                }}
+                                title="Options"
+                              >
+                                ⋮
+                              </button>
+
+                              {isMenuOpen && (
+                                <div className="msg-corner-dropdown">
+                                  <button
+                                    type="button"
+                                    className="dropdown-item"
+                                    onClick={() => {
+                                      setActiveReactionMsgId(m.id)
+                                      setActiveMenuMsgId(null)
+                                    }}
+                                  >
+                                    <span>😊</span> React
+                                  </button>
+
+                                  {isMine && m.message_type === 'text' && (
+                                    <button
+                                      type="button"
+                                      className="dropdown-item"
+                                      onClick={() => {
+                                        setEditingMessage({ id: m.id, content: m.content })
+                                        setActiveMenuMsgId(null)
+                                      }}
+                                    >
+                                      <span>✏️</span> Edit
+                                    </button>
+                                  )}
+
+                                  {isMine && (
+                                    <button
+                                      type="button"
+                                      className="dropdown-item text-danger"
+                                      onClick={() => {
+                                        handleExecuteDelete('everyone', m.id)
+                                        setActiveMenuMsgId(null)
+                                      }}
+                                    >
+                                      <span>🗑️</span> Delete for everyone
+                                    </button>
+                                  )}
+
+                                  <button
+                                    type="button"
+                                    className="dropdown-item text-danger"
+                                    onClick={() => {
+                                      handleExecuteDelete('me', m.id)
+                                      setActiveMenuMsgId(null)
+                                    }}
+                                  >
+                                    <span>👤</span> Delete for me
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           )}
                         </div>
 
@@ -1237,49 +1308,6 @@ export default function Chat() {
               )}
               <div ref={messagesEndRef} />
             </div>
-
-            {/* Clear, Prominent Delete Confirmation Modal */}
-            {deleteModalMsg && (
-              <div className="modal-backdrop" onClick={() => setDeleteModalMsg(null)}>
-                <div
-                  className="modal-card-small delete-modal-box"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div className="delete-modal-head">
-                    <span className="delete-modal-big-icon">🗑️</span>
-                    <h4>Delete message?</h4>
-                  </div>
-                  <p className="delete-modal-prompt">
-                    Choose how you would like to delete this message:
-                  </p>
-                  <div className="modal-actions-col">
-                    {deleteModalMsg.isMine && (
-                      <button
-                        type="button"
-                        className="btn-modal-delete-everyone"
-                        onClick={() => handleExecuteDelete('everyone')}
-                      >
-                        🗑️ Delete for everyone
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="btn-modal-delete-me"
-                      onClick={() => handleExecuteDelete('me')}
-                    >
-                      👤 Delete for me only
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-modal-cancel"
-                      onClick={() => setDeleteModalMsg(null)}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
 
             {/* Input & Send Bar / Voice Recorder Bar */}
             <div className="chat-bottom-bar-wrapper">

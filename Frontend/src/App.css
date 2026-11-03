@@ -2300,106 +2300,31 @@ body {
   position: relative;
 }
 
-/* Floating Action Toolbar on Message Bubble */
-.bubble-actions-toolbar {
-  position: absolute;
-  top: -16px;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 18px;
-  padding: 2px 5px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.15s ease, transform 0.15s ease;
-  z-index: 25;
-}
-
-.outgoing .bubble-actions-toolbar {
-  right: 12px;
-}
-
-.incoming .bubble-actions-toolbar {
-  left: 12px;
-}
-
-.message-bubble-row:hover .bubble-actions-toolbar,
-.message-bubble-row.active-actions .bubble-actions-toolbar {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(-2px);
-}
-
-@media (max-width: 768px) {
-  .bubble-actions-toolbar {
-    opacity: 0.9 !important;
-    pointer-events: auto !important;
-    top: -14px;
-  }
-}
-
-.bubble-action-btn {
-  background: transparent;
-  border: none;
-  font-size: 0.92rem;
-  padding: 2px 6px;
-  border-radius: 6px;
-  cursor: pointer;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-  transition: background 0.12s ease, transform 0.12s ease;
-}
-
-.bubble-action-btn:hover {
-  background: var(--sidebar-item-hover);
-  transform: scale(1.15);
-}
-
-.bubble-action-btn.delete-btn {
-  font-size: 0.95rem;
-}
-
-.bubble-action-btn.delete-btn:hover {
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.15);
-}
-
-.bubble-action-btn.edit-btn:hover {
-  color: #3b82f6;
-  background: rgba(59, 130, 246, 0.15);
-}
-
-/* Floating Reaction Bar Popup */
+/* Floating Reaction Bar Popup (Triggered on Press & Hold) */
 .reaction-bar-popup {
   position: absolute;
-  top: -42px;
+  top: -46px;
   display: flex;
   align-items: center;
   gap: 6px;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 24px;
-  padding: 4px 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.38);
-  z-index: 60;
-  animation: popIn 0.15s ease-out;
+  border-radius: 28px;
+  padding: 4px 10px;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.45);
+  z-index: 150;
+  animation: popIn 0.16s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
 .outgoing .reaction-bar-popup {
-  right: 8px;
+  right: 6px;
 }
 
 .incoming .reaction-bar-popup {
-  left: 8px;
+  left: 6px;
 }
 
-/* Invisible bridge: covers the gap so hovering NEVER loses focus */
+/* Invisible bridge so mouse hover never drops between popup and bubble */
 .reaction-bar-popup::after {
   content: '';
   position: absolute;
@@ -2418,7 +2343,7 @@ body {
 .reaction-emoji-btn {
   background: transparent;
   border: none;
-  font-size: 1.3rem;
+  font-size: 1.35rem;
   cursor: pointer;
   padding: 3px 5px;
   border-radius: 50%;
@@ -2466,56 +2391,88 @@ body {
   font-size: 0.72rem;
 }
 
-/* 5. Message Edited Badge & Deleted State */
-.msg-menu-container {
+/* 5. 3-Dots Corner Menu (Bottom-Right Inside Message Meta) */
+.msg-corner-menu-wrapper {
   position: relative;
   display: inline-flex;
+  align-items: center;
+  margin-left: 3px;
 }
 
-.msg-menu-trigger {
+.msg-corner-dots-btn {
   background: transparent;
   border: none;
   color: inherit;
-  opacity: 0.55;
+  opacity: 0.65;
   cursor: pointer;
-  padding: 0 3px;
-  font-size: 0.85rem;
+  padding: 1px 4px;
+  font-size: 0.95rem;
   line-height: 1;
-  transition: opacity 0.15s ease;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.15s ease, background 0.15s ease;
 }
 
-.msg-menu-trigger:hover {
+.msg-corner-dots-btn:hover,
+.msg-corner-dots-btn.active {
   opacity: 1;
+  background: rgba(255, 255, 255, 0.18);
 }
 
-.msg-menu-dropdown {
+.bubble-incoming .msg-corner-dots-btn:hover,
+.bubble-incoming .msg-corner-dots-btn.active {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.msg-corner-dropdown {
   position: absolute;
-  top: 100%;
+  bottom: calc(100% + 4px);
   right: 0;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
-  padding: 4px 0;
-  min-width: 130px;
-  z-index: 50;
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  padding: 5px 0;
+  min-width: 180px;
+  z-index: 120;
   display: flex;
   flex-direction: column;
+  animation: scaleUp 0.12s ease-out;
 }
 
-.msg-menu-item {
+.bubble-incoming .msg-corner-dropdown {
+  right: auto;
+  left: 0;
+}
+
+.dropdown-item {
   background: transparent;
   border: none;
-  text-align: left;
-  padding: 6px 12px;
-  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-size: 0.88rem;
   color: var(--text-main);
   cursor: pointer;
+  width: 100%;
+  text-align: left;
   transition: background 0.12s ease;
+  white-space: nowrap;
 }
 
-.msg-menu-item:hover {
+.dropdown-item:hover {
   background: var(--sidebar-item-hover);
+}
+
+.dropdown-item.text-danger {
+  color: #ef4444;
+}
+
+.dropdown-item.text-danger:hover {
+  background: rgba(239, 68, 68, 0.12);
 }
 
 .msg-menu-item.text-danger {
