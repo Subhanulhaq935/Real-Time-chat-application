@@ -39,6 +39,7 @@ export default function Chat() {
   // Message edit & delete modals/state
   const [activeReactionMsgId, setActiveReactionMsgId] = useState(null)
   const [activeMenuMsgId, setActiveMenuMsgId] = useState(null)
+  const [menuDirection, setMenuDirection] = useState('up') // 'up' | 'down'
   const [editingMessage, setEditingMessage] = useState(null) // { id: str, content: str }
 
   // WebSocket state
@@ -1106,7 +1107,9 @@ export default function Chat() {
                     <div
                       key={m.id}
                       ref={(el) => (messageItemRefs.current[m.id] = el)}
-                      className={`message-bubble-row ${isMine ? 'outgoing' : 'incoming'}`}
+                      className={`message-bubble-row ${isMine ? 'outgoing' : 'incoming'} ${
+                        isMenuOpen || isReactionOpen ? 'has-active-popup' : ''
+                      }`}
                     >
                       {/* Floating Quick Reaction Bar (Triggered on Press & Hold / Double Click / Menu) */}
                       {!isDeleted && isReactionOpen && (
@@ -1120,7 +1123,7 @@ export default function Chat() {
                       <div
                         className={`message-bubble ${isMine ? 'bubble-outgoing' : 'bubble-incoming'} ${
                           isDeleted ? 'bubble-deleted' : ''
-                        }`}
+                        } ${isMenuOpen || isReactionOpen ? 'has-active-popup' : ''}`}
                         onMouseDown={() => startLongPress(m.id)}
                         onMouseUp={cancelLongPress}
                         onMouseLeave={cancelLongPress}
@@ -1219,11 +1222,19 @@ export default function Chat() {
                             <div
                               className="msg-corner-menu-wrapper"
                               onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onTouchStart={(e) => e.stopPropagation()}
                             >
                               <button
                                 type="button"
                                 className={`msg-corner-dots-btn ${isMenuOpen ? 'active' : ''}`}
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  const btnRect = e.currentTarget.getBoundingClientRect()
+                                  const feedEl = e.currentTarget.closest('.messages-feed')
+                                  const feedRect = feedEl ? feedEl.getBoundingClientRect() : null
+                                  const spaceAbove = feedRect ? btnRect.top - feedRect.top : btnRect.top
+                                  setMenuDirection(spaceAbove > 190 ? 'up' : 'down')
                                   setActiveMenuMsgId(isMenuOpen ? null : m.id)
                                   setActiveReactionMsgId(null)
                                 }}
@@ -1233,17 +1244,18 @@ export default function Chat() {
                               </button>
 
                               {isMenuOpen && (
-                                <div className="msg-corner-dropdown">
+                                <div className={`msg-corner-dropdown ${menuDirection === 'down' ? 'open-down' : 'open-up'}`}>
                                   {myCurrentEmoji ? (
                                     <button
                                       type="button"
-                                      className="dropdown-item text-danger"
+                                      className="dropdown-item dropdown-item-danger"
                                       onClick={() => {
                                         handleToggleReaction(m.id, 'remove')
                                         setActiveMenuMsgId(null)
                                       }}
                                     >
-                                      <span>✕</span> Remove React ({myCurrentEmoji})
+                                      <span className="dropdown-icon-badge danger-badge">✕</span>
+                                      <span className="dropdown-label">Remove React ({myCurrentEmoji})</span>
                                     </button>
                                   ) : (
                                     <button
@@ -1254,7 +1266,8 @@ export default function Chat() {
                                         setActiveMenuMsgId(null)
                                       }}
                                     >
-                                      <span>😊</span> React
+                                      <span className="dropdown-icon-badge">😊</span>
+                                      <span className="dropdown-label">React</span>
                                     </button>
                                   )}
 
@@ -1267,32 +1280,37 @@ export default function Chat() {
                                         setActiveMenuMsgId(null)
                                       }}
                                     >
-                                      <span>✏️</span> Edit
+                                      <span className="dropdown-icon-badge edit-badge">✏️</span>
+                                      <span className="dropdown-label">Edit</span>
                                     </button>
                                   )}
+
+                                  <div className="dropdown-divider" />
 
                                   {isMine && (
                                     <button
                                       type="button"
-                                      className="dropdown-item text-danger"
+                                      className="dropdown-item dropdown-item-danger"
                                       onClick={() => {
                                         handleExecuteDelete('everyone', m.id)
                                         setActiveMenuMsgId(null)
                                       }}
                                     >
-                                      <span>🗑️</span> Delete for everyone
+                                      <span className="dropdown-icon-badge danger-badge">🗑️</span>
+                                      <span className="dropdown-label">Delete for everyone</span>
                                     </button>
                                   )}
 
                                   <button
                                     type="button"
-                                    className="dropdown-item text-danger"
+                                    className="dropdown-item dropdown-item-danger"
                                     onClick={() => {
                                       handleExecuteDelete('me', m.id)
                                       setActiveMenuMsgId(null)
                                     }}
                                   >
-                                    <span>👤</span> Delete for me
+                                    <span className="dropdown-icon-badge danger-badge">👤</span>
+                                    <span className="dropdown-label">Delete for me</span>
                                   </button>
                                 </div>
                               )}
