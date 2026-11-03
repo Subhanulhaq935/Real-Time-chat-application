@@ -4,6 +4,15 @@ A modern, responsive real-time 1-on-1 chatting platform built with **FastAPI**, 
 
 ---
 
+## 🌐 Live Demo
+
+- **Frontend App (Vercel)**: [https://real-time-chat-application-subhanulhaq935-gmailcoms-projects.vercel.app](https://real-time-chat-application-subhanulhaq935-gmailcoms-projects.vercel.app)
+- **Backend API (Render)**: [https://chat-backend-9mbl.onrender.com](https://chat-backend-9mbl.onrender.com)
+- **Interactive Swagger Docs**: [https://chat-backend-9mbl.onrender.com/docs](https://chat-backend-9mbl.onrender.com/docs)
+- **Health Check**: [https://chat-backend-9mbl.onrender.com/health](https://chat-backend-9mbl.onrender.com/health)
+
+---
+
 ## 🚀 Key Features
 
 - **Real-Time Bidirectional Messaging**: Sub-millisecond messaging via WebSockets with persistent PostgreSQL storage.
