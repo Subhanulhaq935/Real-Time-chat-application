@@ -38,14 +38,16 @@ class Settings(BaseSettings):
     @field_validator("CORS_ORIGINS", mode="before")
     def parse_cors_origins(cls, v):
         if isinstance(v, str):
-            cleaned = v.strip()
+            cleaned = v.strip().strip("'\"")
             if cleaned.startswith("["):
                 import json
                 try:
                     return json.loads(cleaned)
                 except Exception:
                     pass
-            return [origin.strip() for origin in cleaned.split(",") if origin.strip()]
+            return [origin.strip().strip("'\"").rstrip("/") for origin in cleaned.split(",") if origin.strip()]
+        elif isinstance(v, list):
+            return [o.rstrip("/") if isinstance(o, str) else o for o in v]
         return v
 
     @field_validator("DATABASE_URL", mode="before")
