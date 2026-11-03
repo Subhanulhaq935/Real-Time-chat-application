@@ -7,31 +7,47 @@ export default function VoiceRecorderBar({ onSendAudio, onCancel }) {
   const audioChunksRef = useRef([])
   const streamRef = useRef(null)
   const timerRef = useRef(null)
+  const isStoppedRef = useRef(false)
 
   useEffect(() => {
     let isMounted = true
 
     const startRecording = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        })
+
         if (!isMounted) {
           stream.getTracks().forEach((track) => track.stop())
           return
         }
         streamRef.current = stream
 
-        let mimeType = 'audio/webm'
-        if (typeof MediaRecorder.isTypeSupported === 'function') {
-          if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-            mimeType = 'audio/webm;codecs=opus'
-          } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
-            mimeType = 'audio/ogg;codecs=opus'
-          } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-            mimeType = 'audio/mp4'
+        // Detect best supported MIME type across Chrome, Safari, Firefox
+        let mimeType = ''
+        const candidates = [
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/mp4',
+          'audio/aac',
+          'audio/ogg;codecs=opus',
+        ]
+        if (typeof MediaRecorder !== 'undefined' && typeof MediaRecorder.isTypeSupported === 'function') {
+          for (const cand of candidates) {
+            if (MediaRecorder.isTypeSupported(cand)) {
+              mimeType = cand
+              break
+            }
           }
         }
 
-        const mediaRecorder = new MediaRecorder(stream, { mimeType })
+        const options = mimeType ? { mimeType } : {}
+        const mediaRecorder = new MediaRecorder(stream, options)
         mediaRecorderRef.current = mediaRecorder
         audioChunksRef.current = []
 
@@ -41,15 +57,16 @@ export default function VoiceRecorderBar({ onSendAudio, onCancel }) {
           }
         }
 
-        mediaRecorder.start(250) // slice every 250ms
+        // Slice every 200ms so data is constantly accumulated
+        mediaRecorder.start(200)
         setIsRecording(true)
 
         timerRef.current = setInterval(() => {
           setSeconds((prev) => prev + 1)
         }, 1000)
       } catch (err) {
-        console.error('Microphone access denied or error:', err)
-        alert('Could not access microphone. Please allow microphone permissions in your browser.')
+        console.error('Microphone error:', err)
+        alert('Microphone access is needed to record voice notes. Please allow microphone permission.')
         onCancel()
       }
     }
@@ -66,6 +83,9 @@ export default function VoiceRecorderBar({ onSendAudio, onCancel }) {
   }, [onCancel])
 
   const handleStopAndSend = () => {
+    if (isStoppedRef.current) return
+    isStoppedRef.current = true
+
     if (timerRef.current) clearInterval(timerRef.current)
     const recorder = mediaRecorderRef.current
 
@@ -73,8 +93,16 @@ export default function VoiceRecorderBar({ onSendAudio, onCancel }) {
       recorder.onstop = () => {
         const mime = recorder.mimeType || 'audio/webm'
         const audioBlob = new Blob(audioChunksRef.current, { type: mime })
+
+        // Stop microphone stream tracks
         if (streamRef.current) {
           streamRef.current.getTracks().forEach((t) => t.stop())
+        }
+
+        if (audioBlob.size === 0) {
+          alert('Recording had no audio. Please try again.')
+          onCancel()
+          return
         }
 
         const reader = new FileReader()
@@ -84,6 +112,15 @@ export default function VoiceRecorderBar({ onSendAudio, onCancel }) {
         }
         reader.readAsDataURL(audioBlob)
       }
+
+      // Force flush any remaining buffered audio bytes before stopping
+      try {
+        if (recorder.state === 'recording') {
+          recorder.requestData()
+        }
+      } catch (err) {
+        console.warn('requestData error:', err)
+      }
       recorder.stop()
     } else {
       onCancel()
@@ -91,6 +128,9 @@ export default function VoiceRecorderBar({ onSendAudio, onCancel }) {
   }
 
   const handleDiscard = () => {
+    if (isStoppedRef.current) return
+    isStoppedRef.current = true
+
     if (timerRef.current) clearInterval(timerRef.current)
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop()
@@ -112,7 +152,7 @@ export default function VoiceRecorderBar({ onSendAudio, onCancel }) {
       <div className="voice-rec-left">
         <span className="rec-pulse-dot" />
         <span className="rec-timer-text">{formatTimer(seconds)}</span>
-        <span className="rec-recording-label">Recording audio...</span>
+        <span className="rec-recording-label">Recording voice note...</span>
       </div>
 
       <div className="voice-rec-actions">

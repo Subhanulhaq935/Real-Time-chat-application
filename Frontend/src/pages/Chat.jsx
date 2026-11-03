@@ -37,7 +37,7 @@ export default function Chat() {
   const [currentSearchIdx, setCurrentSearchIdx] = useState(0)
 
   // Message edit & delete modals/state
-  const [activeMenuMsgId, setActiveMenuMsgId] = useState(null)
+  const [activeReactionMsgId, setActiveReactionMsgId] = useState(null)
   const [editingMessage, setEditingMessage] = useState(null) // { id: str, content: str }
   const [hoveredMsgId, setHoveredMsgId] = useState(null)
   const [deleteModalMsg, setDeleteModalMsg] = useState(null) // { id: str, isMine: bool }
@@ -70,7 +70,7 @@ export default function Chat() {
   // Close menus when clicking outside
   useEffect(() => {
     const handleGlobalClick = () => {
-      setActiveMenuMsgId(null)
+      setActiveReactionMsgId(null)
     }
     window.addEventListener('click', handleGlobalClick)
     return () => window.removeEventListener('click', handleGlobalClick)
@@ -647,9 +647,37 @@ export default function Chat() {
     }
   }
 
-  // 6. Handle Reaction
+  // 6. Handle Reaction with Optimistic 0ms UI Feedback
   const handleToggleReaction = async (messageId, emoji) => {
     if (!activeConv) return
+    setActiveReactionMsgId(null)
+
+    const myUidStr = String(user?.id)
+    const myName = user?.full_name || 'You'
+
+    // Optimistic update
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id !== messageId) return m
+
+        const currentReactions = Array.isArray(m.reactions) ? [...m.reactions] : []
+        const alreadyHadSame = currentReactions.some(
+          (r) => String(r.user_id) === myUidStr && r.emoji === emoji
+        )
+
+        const filtered = currentReactions.filter((r) => String(r.user_id) !== myUidStr)
+        if (!alreadyHadSame) {
+          filtered.push({
+            emoji,
+            user_id: myUidStr,
+            user_name: myName,
+          })
+        }
+
+        return { ...m, reactions: filtered }
+      })
+    )
+
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'reaction', message_id: messageId, emoji }))
     } else {
@@ -668,6 +696,11 @@ export default function Chat() {
   const handleSaveEdit = async () => {
     if (!editingMessage || !editingMessage.content.trim() || !activeConv) return
     const { id, content } = editingMessage
+
+    // Optimistic local update
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, content: content.trim(), is_edited: true } : m))
+    )
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(
@@ -688,6 +721,18 @@ export default function Chat() {
     if (!deleteModalMsg || !activeConv) return
     const { id } = deleteModalMsg
 
+    if (deleteType === 'me') {
+      setMessages((prev) => prev.filter((m) => m.id !== id))
+    } else {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === id
+            ? { ...m, content: '🚫 This message was deleted', media_url: null, is_deleted_everyone: true }
+            : m
+        )
+      )
+    }
+
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(
         JSON.stringify({ type: 'delete_message', message_id: id, delete_type: deleteType })
@@ -700,9 +745,6 @@ export default function Chat() {
       }
     }
 
-    if (deleteType === 'me') {
-      setMessages((prev) => prev.filter((m) => m.id !== id))
-    }
     setDeleteModalMsg(null)
   }
 
@@ -1013,7 +1055,8 @@ export default function Chat() {
                     (user?.id && String(m.sender_id).toLowerCase() === String(user.id).toLowerCase())
                   )
                   const isHovered = hoveredMsgId === m.id
-                  const isMenuOpen = activeMenuMsgId === m.id
+                  const isReactionActive = activeReactionMsgId === m.id
+                  const isReactionVisible = !m.is_deleted_everyone && (isHovered || isReactionActive)
                   const isEditingThis = editingMessage?.id === m.id
                   const isDeleted = m.is_deleted_everyone
 
@@ -1036,14 +1079,17 @@ export default function Chat() {
                     <div
                       key={m.id}
                       ref={(el) => (messageItemRefs.current[m.id] = el)}
-                      className={`message-bubble-row ${isMine ? 'outgoing' : 'incoming'}`}
+                      className={`message-bubble-row ${isMine ? 'outgoing' : 'incoming'} ${
+                        isReactionActive ? 'active-actions' : ''
+                      }`}
                       onMouseEnter={() => setHoveredMsgId(m.id)}
                       onMouseLeave={() => setHoveredMsgId(null)}
                     >
                       {/* Floating Quick Reaction Bar */}
-                      {!isDeleted && isHovered && (
+                      {isReactionVisible && (
                         <MessageReactionBar
                           onReact={(emoji) => handleToggleReaction(m.id, emoji)}
+                          onClose={() => setActiveReactionMsgId(null)}
                         />
                       )}
 
@@ -1052,6 +1098,42 @@ export default function Chat() {
                           isDeleted ? 'bubble-deleted' : ''
                         }`}
                       >
+                        {/* Clear Action Toolbar (React 😊, Edit ✏️, Delete 🗑️) */}
+                        {!isDeleted && (
+                          <div className="bubble-actions-toolbar" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              className="bubble-action-btn react-btn"
+                              onClick={() =>
+                                setActiveReactionMsgId((prev) => (prev === m.id ? null : m.id))
+                              }
+                              title="Add reaction"
+                            >
+                              😊
+                            </button>
+
+                            {isMine && m.message_type === 'text' && (
+                              <button
+                                type="button"
+                                className="bubble-action-btn edit-btn"
+                                onClick={() => setEditingMessage({ id: m.id, content: m.content })}
+                                title="Edit message"
+                              >
+                                ✏️
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              className="bubble-action-btn delete-btn"
+                              onClick={() => setDeleteModalMsg({ id: m.id, isMine })}
+                              title="Delete message"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        )}
+
                         {!isMine && (
                           <div className="message-sender-label">
                             {otherParticipant?.display_name || m.sender_name}
@@ -1106,7 +1188,7 @@ export default function Chat() {
                           </div>
                         )}
 
-                        {/* Message Meta (Time, Edited tag, Ticks & 3-dots action menu) */}
+                        {/* Message Meta (Time, Edited tag, Ticks) */}
                         <div className="message-meta">
                           {m.is_edited && !isDeleted && (
                             <span className="edited-badge" title="Edited message">
@@ -1128,53 +1210,6 @@ export default function Chat() {
                             >
                               {m.is_read ? '✓✓' : '✓'}
                             </span>
-                          )}
-
-                          {/* 3-dots action menu trigger */}
-                          {!isDeleted && (
-                            <div className="msg-menu-container">
-                              <button
-                                type="button"
-                                className="msg-menu-trigger"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  setActiveMenuMsgId(isMenuOpen ? null : m.id)
-                                }}
-                                title="Message options"
-                              >
-                                ⋮
-                              </button>
-
-                              {isMenuOpen && (
-                                <div
-                                  className="msg-menu-dropdown"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  {isMine && m.message_type === 'text' && (
-                                    <button
-                                      type="button"
-                                      className="msg-menu-item"
-                                      onClick={() => {
-                                        setEditingMessage({ id: m.id, content: m.content })
-                                        setActiveMenuMsgId(null)
-                                      }}
-                                    >
-                                      ✏️ Edit
-                                    </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    className="msg-menu-item text-danger"
-                                    onClick={() => {
-                                      setDeleteModalMsg({ id: m.id, isMine })
-                                      setActiveMenuMsgId(null)
-                                    }}
-                                  >
-                                    🗑️ Delete
-                                  </button>
-                                </div>
-                              )}
-                            </div>
                           )}
                         </div>
 
@@ -1203,32 +1238,40 @@ export default function Chat() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Delete Confirmation Modal */}
+            {/* Clear, Prominent Delete Confirmation Modal */}
             {deleteModalMsg && (
               <div className="modal-backdrop" onClick={() => setDeleteModalMsg(null)}>
-                <div className="modal-card-small" onClick={(e) => e.stopPropagation()}>
-                  <h4>Delete message?</h4>
-                  <p>Choose how you want to delete this message:</p>
+                <div
+                  className="modal-card-small delete-modal-box"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="delete-modal-head">
+                    <span className="delete-modal-big-icon">🗑️</span>
+                    <h4>Delete message?</h4>
+                  </div>
+                  <p className="delete-modal-prompt">
+                    Choose how you would like to delete this message:
+                  </p>
                   <div className="modal-actions-col">
                     {deleteModalMsg.isMine && (
                       <button
                         type="button"
-                        className="button button-danger"
+                        className="btn-modal-delete-everyone"
                         onClick={() => handleExecuteDelete('everyone')}
                       >
-                        Delete for everyone
+                        🗑️ Delete for everyone
                       </button>
                     )}
                     <button
                       type="button"
-                      className="button button-secondary"
+                      className="btn-modal-delete-me"
                       onClick={() => handleExecuteDelete('me')}
                     >
-                      Delete for me
+                      👤 Delete for me only
                     </button>
                     <button
                       type="button"
-                      className="button button-outline"
+                      className="btn-modal-cancel"
                       onClick={() => setDeleteModalMsg(null)}
                     >
                       Cancel

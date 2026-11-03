@@ -43,3 +43,4 @@ def downgrade() -> None:
     op.drop_column('messages', 'media_url')
     op.drop_column('messages', 'message_type')
     op.drop_column('users', 'last_seen_at')
+

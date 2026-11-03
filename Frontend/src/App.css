@@ -2295,32 +2295,119 @@ body {
   transform: scale(1.2);
 }
 
-/* 4. Message Quick Reaction Bar & Pills */
+/* 4. Message Quick Reaction Bar & Action Toolbar */
 .message-bubble-row {
   position: relative;
 }
 
-.reaction-bar-popup {
+/* Floating Action Toolbar on Message Bubble */
+.bubble-actions-toolbar {
   position: absolute;
-  top: -34px;
+  top: -16px;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 20px;
+  border-radius: 18px;
+  padding: 2px 5px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 25;
+}
+
+.outgoing .bubble-actions-toolbar {
+  right: 12px;
+}
+
+.incoming .bubble-actions-toolbar {
+  left: 12px;
+}
+
+.message-bubble-row:hover .bubble-actions-toolbar,
+.message-bubble-row.active-actions .bubble-actions-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(-2px);
+}
+
+@media (max-width: 768px) {
+  .bubble-actions-toolbar {
+    opacity: 0.9 !important;
+    pointer-events: auto !important;
+    top: -14px;
+  }
+}
+
+.bubble-action-btn {
+  background: transparent;
+  border: none;
+  font-size: 0.92rem;
   padding: 2px 6px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
-  z-index: 20;
+  border-radius: 6px;
+  cursor: pointer;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  transition: background 0.12s ease, transform 0.12s ease;
+}
+
+.bubble-action-btn:hover {
+  background: var(--sidebar-item-hover);
+  transform: scale(1.15);
+}
+
+.bubble-action-btn.delete-btn {
+  font-size: 0.95rem;
+}
+
+.bubble-action-btn.delete-btn:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.bubble-action-btn.edit-btn:hover {
+  color: #3b82f6;
+  background: rgba(59, 130, 246, 0.15);
+}
+
+/* Floating Reaction Bar Popup */
+.reaction-bar-popup {
+  position: absolute;
+  top: -42px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 24px;
+  padding: 4px 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.38);
+  z-index: 60;
   animation: popIn 0.15s ease-out;
 }
 
 .outgoing .reaction-bar-popup {
-  right: 12px;
+  right: 8px;
 }
 
 .incoming .reaction-bar-popup {
-  left: 12px;
+  left: 8px;
+}
+
+/* Invisible bridge: covers the gap so hovering NEVER loses focus */
+.reaction-bar-popup::after {
+  content: '';
+  position: absolute;
+  bottom: -18px;
+  left: 0;
+  right: 0;
+  height: 20px;
+  background: transparent;
 }
 
 @keyframes popIn {
@@ -2331,9 +2418,9 @@ body {
 .reaction-emoji-btn {
   background: transparent;
   border: none;
-  font-size: 1.25rem;
+  font-size: 1.3rem;
   cursor: pointer;
-  padding: 2px 4px;
+  padding: 3px 5px;
   border-radius: 50%;
   transition: transform 0.12s ease;
   line-height: 1;
@@ -2347,18 +2434,18 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-top: 4px;
+  margin-top: 5px;
 }
 
 .reaction-pill {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: 12px;
-  padding: 1px 6px;
-  font-size: 0.75rem;
+  padding: 2px 7px;
+  font-size: 0.78rem;
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   cursor: pointer;
   color: var(--text-main);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
@@ -2371,15 +2458,15 @@ body {
 
 .reaction-pill.active {
   border-color: var(--primary);
-  background: rgba(0, 168, 132, 0.12);
+  background: rgba(0, 168, 132, 0.15);
 }
 
 .reaction-pill .r-count {
   font-weight: 600;
-  font-size: 0.7rem;
+  font-size: 0.72rem;
 }
 
-/* 5. Message 3-Dots Menu, Edited Badge & Deleted State */
+/* 5. Message Edited Badge & Deleted State */
 .msg-menu-container {
   position: relative;
   display: inline-flex;
@@ -2664,47 +2751,134 @@ body {
   letter-spacing: -1px;
 }
 
-/* 8. Delete Confirmation Modal */
+/* 8. Delete Confirmation Modal (Prominent & Clear) */
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.65);
+  background: rgba(0, 0, 0, 0.72);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
-  backdrop-filter: blur(3px);
+  z-index: 2000;
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.15s ease-out;
 }
 
-.modal-card-small {
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 1.5rem;
-  width: 320px;
-  max-width: 90vw;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+.delete-modal-box {
+  background: var(--bg-card) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 16px !important;
+  padding: 1.75rem !important;
+  width: 340px !important;
+  max-width: 92vw !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5) !important;
+  text-align: center;
+  animation: scaleUp 0.15s ease-out;
 }
 
-.modal-card-small h4 {
-  margin: 0 0 0.5rem 0;
+@keyframes scaleUp {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.delete-modal-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.65rem;
+}
+
+.delete-modal-big-icon {
+  font-size: 2.2rem;
+  line-height: 1;
+}
+
+.delete-modal-head h4 {
+  margin: 0;
+  font-size: 1.25rem;
   color: var(--text-main);
-  font-size: 1.1rem;
+  font-weight: 700;
 }
 
-.modal-card-small p {
+.delete-modal-prompt {
   color: var(--text-muted);
-  font-size: 0.9rem;
-  margin: 0 0 1.25rem 0;
+  font-size: 0.92rem;
+  margin: 0 0 1.35rem 0;
+  line-height: 1.45;
 }
 
 .modal-actions-col {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.65rem;
 }
 
-.modal-actions-col button {
-  width: 100%;
+.btn-modal-delete-everyone {
+  background: #dc2626 !important;
+  color: #ffffff !important;
+  border: none !important;
+  border-radius: 10px !important;
+  padding: 0.75rem 1rem !important;
+  font-size: 0.95rem !important;
+  font-weight: 600 !important;
+  cursor: pointer;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: background 0.15s ease, transform 0.1s ease;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.35);
+}
+
+.btn-modal-delete-everyone:hover {
+  background: #b91c1c !important;
+  transform: translateY(-1px);
+}
+
+.btn-modal-delete-me {
+  background: var(--sidebar-item-hover) !important;
+  color: var(--text-main) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 10px !important;
+  padding: 0.7rem 1rem !important;
+  font-size: 0.92rem !important;
+  font-weight: 500 !important;
+  cursor: pointer;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: background 0.15s ease;
+}
+
+.btn-modal-delete-me:hover {
+  background: rgba(255, 255, 255, 0.14) !important;
+}
+
+.btn-modal-cancel {
+  background: transparent !important;
+  color: var(--text-muted) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 10px !important;
+  padding: 0.65rem 1rem !important;
+  font-size: 0.9rem !important;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-modal-cancel:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: var(--text-main) !important;
+}
+
+/* Audio Player Waveform Animation */
+.audio-bar.pulsing {
+  animation: barPulse 0.8s infinite alternate ease-in-out;
+}
+
+@keyframes barPulse {
+  from { opacity: 0.75; }
+  to { opacity: 1; filter: brightness(1.2); }
 }
 
