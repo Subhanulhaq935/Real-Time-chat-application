@@ -180,13 +180,14 @@ class ChatRepository:
             current_reactions = list(msg.reactions or [])
             uid_str = str(user_id)
             filtered = [r for r in current_reactions if r.get("user_id") != uid_str]
-            already_had_same = any(r.get("user_id") == uid_str and r.get("emoji") == emoji for r in current_reactions)
-            if not already_had_same:
-                filtered.append({
-                    "emoji": emoji,
-                    "user_id": uid_str,
-                    "user_name": user_name,
-                })
+            if emoji and emoji != "remove":
+                already_had_same = any(r.get("user_id") == uid_str and r.get("emoji") == emoji for r in current_reactions)
+                if not already_had_same:
+                    filtered.append({
+                        "emoji": emoji,
+                        "user_id": uid_str,
+                        "user_name": user_name,
+                    })
             msg.reactions = filtered
             self.db.commit()
             self.db.refresh(msg)

@@ -688,7 +688,7 @@ export default function Chat() {
         )
 
         const filtered = currentReactions.filter((r) => String(r.user_id) !== myUidStr)
-        if (!alreadyHadSame) {
+        if (!alreadyHadSame && emoji !== 'remove') {
           filtered.push({
             emoji,
             user_id: myUidStr,
@@ -1087,6 +1087,7 @@ export default function Chat() {
 
                   // Group reactions by emoji
                   const reactionCounts = {}
+                  let myCurrentEmoji = null
                   if (m.reactions && Array.isArray(m.reactions)) {
                     m.reactions.forEach((r) => {
                       if (!reactionCounts[r.emoji]) {
@@ -1096,6 +1097,7 @@ export default function Chat() {
                       reactionCounts[r.emoji].users.push(r.user_name || 'Someone')
                       if (user?.id && String(r.user_id) === String(user.id)) {
                         reactionCounts[r.emoji].hasMine = true
+                        myCurrentEmoji = r.emoji
                       }
                     })
                   }
@@ -1109,6 +1111,7 @@ export default function Chat() {
                       {/* Floating Quick Reaction Bar (Triggered on Press & Hold / Double Click / Menu) */}
                       {!isDeleted && isReactionOpen && (
                         <MessageReactionBar
+                          currentReaction={myCurrentEmoji}
                           onReact={(emoji) => handleToggleReaction(m.id, emoji)}
                           onClose={() => setActiveReactionMsgId(null)}
                         />
@@ -1231,16 +1234,29 @@ export default function Chat() {
 
                               {isMenuOpen && (
                                 <div className="msg-corner-dropdown">
-                                  <button
-                                    type="button"
-                                    className="dropdown-item"
-                                    onClick={() => {
-                                      setActiveReactionMsgId(m.id)
-                                      setActiveMenuMsgId(null)
-                                    }}
-                                  >
-                                    <span>😊</span> React
-                                  </button>
+                                  {myCurrentEmoji ? (
+                                    <button
+                                      type="button"
+                                      className="dropdown-item text-danger"
+                                      onClick={() => {
+                                        handleToggleReaction(m.id, 'remove')
+                                        setActiveMenuMsgId(null)
+                                      }}
+                                    >
+                                      <span>✕</span> Remove React ({myCurrentEmoji})
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="dropdown-item"
+                                      onClick={() => {
+                                        setActiveReactionMsgId(m.id)
+                                        setActiveMenuMsgId(null)
+                                      }}
+                                    >
+                                      <span>😊</span> React
+                                    </button>
+                                  )}
 
                                   {isMine && m.message_type === 'text' && (
                                     <button
@@ -1292,8 +1308,8 @@ export default function Chat() {
                                 key={emoji}
                                 type="button"
                                 className={`reaction-pill ${data.hasMine ? 'active' : ''}`}
-                                onClick={() => handleToggleReaction(m.id, emoji)}
-                                title={data.users.join(', ')}
+                                onClick={() => handleToggleReaction(m.id, data.hasMine ? 'remove' : emoji)}
+                                title={data.hasMine ? 'Click to remove your reaction' : data.users.join(', ')}
                               >
                                 <span>{emoji}</span>
                                 {data.count > 1 && <span className="r-count">{data.count}</span>}

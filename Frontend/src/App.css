@@ -2347,12 +2347,42 @@ body {
   cursor: pointer;
   padding: 3px 5px;
   border-radius: 50%;
-  transition: transform 0.12s ease;
+  transition: transform 0.12s ease, background 0.12s ease;
   line-height: 1;
 }
 
 .reaction-emoji-btn:hover {
   transform: scale(1.35);
+}
+
+.reaction-emoji-btn.active-reacted {
+  background: rgba(0, 168, 132, 0.25);
+  transform: scale(1.15);
+  box-shadow: 0 0 0 2px var(--primary);
+}
+
+.reaction-remove-btn {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  margin-left: 2px;
+  transition: transform 0.12s ease, background 0.12s ease;
+  line-height: 1;
+}
+
+.reaction-remove-btn:hover {
+  background: rgba(239, 68, 68, 0.35);
+  transform: scale(1.18);
 }
 
 .bubble-reactions-row {

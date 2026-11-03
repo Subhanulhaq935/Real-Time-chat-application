@@ -2,24 +2,40 @@ import React from 'react'
 
 const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏']
 
-export default function MessageReactionBar({ onReact, onClose }) {
+export default function MessageReactionBar({ currentReaction, onReact, onClose }) {
   return (
     <div className="reaction-bar-popup" onClick={(e) => e.stopPropagation()}>
-      {REACTION_EMOJIS.map((emoji) => (
+      {REACTION_EMOJIS.map((emoji) => {
+        const isSelected = currentReaction === emoji
+        return (
+          <button
+            key={emoji}
+            type="button"
+            className={`reaction-emoji-btn ${isSelected ? 'active-reacted' : ''}`}
+            onClick={() => {
+              onReact(isSelected ? 'remove' : emoji)
+              if (onClose) onClose()
+            }}
+            title={isSelected ? 'Click to remove reaction' : emoji}
+          >
+            {emoji}
+          </button>
+        )
+      })}
+
+      {currentReaction && (
         <button
-          key={emoji}
           type="button"
-          className="reaction-emoji-btn"
+          className="reaction-remove-btn"
           onClick={() => {
-            onReact(emoji)
+            onReact('remove')
             if (onClose) onClose()
           }}
-          title={emoji}
+          title="Remove reaction"
         >
-          {emoji}
+          ✕
         </button>
-      ))}
+      )}
     </div>
   )
 }
-
