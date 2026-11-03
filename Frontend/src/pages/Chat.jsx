@@ -598,7 +598,7 @@ export default function Chat() {
               />
               <button
                 type="submit"
-                className="button button-primary send-btn"
+                className="send-btn"
                 disabled={!inputText.trim()}
               >
                 Send 🚀
