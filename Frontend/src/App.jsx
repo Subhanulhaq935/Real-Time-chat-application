@@ -8,6 +8,7 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Chat from './pages/Chat'
 import Status from './pages/Status'
+import InstallPrompt from './components/InstallPrompt'
 import './App.css'
 
 function AppRoutes() {
@@ -41,6 +42,7 @@ function AppRoutes() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
+      <InstallPrompt />
     </div>
   )
 }
