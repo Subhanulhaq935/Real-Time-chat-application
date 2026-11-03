@@ -1,7 +1,19 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { getChatsList, getChatMessages, sendMessageRest, markChatAsRead } from '../api/chats'
+import {
+  getChatsList,
+  getChatMessages,
+  sendMessageRest,
+  editMessageRest,
+  deleteMessageRest,
+  toggleReactionRest,
+  markChatAsRead,
+} from '../api/chats'
+import AudioMessagePlayer from '../components/AudioMessagePlayer'
+import EmojiPicker from '../components/EmojiPicker'
+import MessageReactionBar from '../components/MessageReactionBar'
+import VoiceRecorderBar from '../components/VoiceRecorderBar'
 
 export default function Chat() {
   const { user } = useAuth()
@@ -16,6 +28,20 @@ export default function Chat() {
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [inputText, setInputText] = useState('')
 
+  // Advanced features states
+  const [isRecording, setIsRecording] = useState(false)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [typingMap, setTypingMap] = useState({}) // { [convId]: { isTyping: bool, userName: str } }
+  const [searchQuery, setSearchQuery] = useState('')
+  const [isSearching, setIsSearching] = useState(false)
+  const [currentSearchIdx, setCurrentSearchIdx] = useState(0)
+
+  // Message edit & delete modals/state
+  const [activeMenuMsgId, setActiveMenuMsgId] = useState(null)
+  const [editingMessage, setEditingMessage] = useState(null) // { id: str, content: str }
+  const [hoveredMsgId, setHoveredMsgId] = useState(null)
+  const [deleteModalMsg, setDeleteModalMsg] = useState(null) // { id: str, isMine: bool }
+
   // WebSocket state
   const [wsStatus, setWsStatus] = useState('disconnected') // 'connecting' | 'connected' | 'disconnected'
   const wsRef = useRef(null)
@@ -24,6 +50,9 @@ export default function Chat() {
   const messagesEndRef = useRef(null)
   const reconnectTimeoutRef = useRef(null)
   const userReconnectTimeoutRef = useRef(null)
+  const typingTimeoutRef = useRef(null)
+  const isTypingLocalRef = useRef(false)
+  const messageItemRefs = useRef({})
 
   useEffect(() => {
     activeConvRef.current = activeConv
@@ -38,15 +67,47 @@ export default function Chat() {
     setSearchParams({})
   }
 
+  // Close menus when clicking outside
+  useEffect(() => {
+    const handleGlobalClick = () => {
+      setActiveMenuMsgId(null)
+    }
+    window.addEventListener('click', handleGlobalClick)
+    return () => window.removeEventListener('click', handleGlobalClick)
+  }, [])
+
+  // Format Last Seen Time
+  const formatLastSeen = (lastSeenAt) => {
+    if (!lastSeenAt) return 'Offline'
+    try {
+      const date = new Date(lastSeenAt)
+      if (isNaN(date.getTime())) return 'Offline'
+      const now = new Date()
+      const isToday = date.toDateString() === now.toDateString()
+      const yesterday = new Date(now)
+      yesterday.setDate(now.getDate() - 1)
+      const isYesterday = date.toDateString() === yesterday.toDateString()
+      const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      if (isToday) return `Last seen today at ${timeStr}`
+      if (isYesterday) return `Last seen yesterday at ${timeStr}`
+      return `Last seen on ${date.toLocaleDateString([], { month: 'short', day: 'numeric' })} at ${timeStr}`
+    } catch {
+      return 'Offline'
+    }
+  }
+
   // 1. Fetch Conversations List
   const loadConversations = async (silent = false) => {
     try {
       const data = await getChatsList()
       setConversations((prev) => {
         const currentActiveId = activeConvRef.current?.id
-        return data.map((conv) =>
-          conv.id === currentActiveId ? { ...conv, unread_count: 0 } : conv
-        )
+        return data.map((conv) => {
+          if (conv.id === currentActiveId) {
+            return { ...conv, unread_count: 0 }
+          }
+          return conv
+        })
       })
 
       if (!silent) {
@@ -68,16 +129,13 @@ export default function Chat() {
 
   useEffect(() => {
     loadConversations(false)
-
-    // Background silent sync every 2.5s so sidebar unread badges & previews stay live
     const pollInterval = setInterval(() => {
       loadConversations(true)
-    }, 2500)
-
+    }, 4000)
     return () => clearInterval(pollInterval)
   }, [])
 
-  // 1b. User-Level Real-Time Stream (updates sidebar even when no chat is selected)
+  // 1b. User-Level Real-Time Stream (sidebar updates, typing, user presence)
   useEffect(() => {
     if (!user?.id) return
     let isMounted = true
@@ -98,6 +156,41 @@ export default function Chat() {
         if (!isMounted) return
         try {
           const payload = JSON.parse(event.data)
+
+          // User presence status
+          if (payload.type === 'user_status') {
+            const { user_id, is_online, last_seen_at } = payload
+            setConversations((prev) =>
+              prev.map((c) => {
+                if (c.other_participant?.id === user_id) {
+                  return {
+                    ...c,
+                    other_participant: {
+                      ...c.other_participant,
+                      is_online,
+                      last_seen_at: last_seen_at || c.other_participant.last_seen_at,
+                    },
+                  }
+                }
+                return c
+              })
+            )
+            setActiveConv((prev) => {
+              if (prev && prev.other_participant?.id === user_id) {
+                return {
+                  ...prev,
+                  other_participant: {
+                    ...prev.other_participant,
+                    is_online,
+                    last_seen_at: last_seen_at || prev.other_participant.last_seen_at,
+                  },
+                }
+              }
+              return prev
+            })
+          }
+
+          // Real-time new message preview in sidebar
           if (payload.type === 'new_message' && payload.message) {
             const newMsg = payload.message
             const isFromMe = Boolean(
@@ -114,7 +207,6 @@ export default function Chat() {
 
               const updated = prev.map((c) => {
                 if (c.id === newMsg.conversation_id) {
-                  // Avoid double-counting if this exact message was already recorded as last_message
                   if (c.last_message?.id === newMsg.id) return c
                   const isActive = currentActiveId === c.id
                   const newUnread = isActive || isFromMe ? 0 : (c.unread_count || 0) + 1
@@ -131,7 +223,6 @@ export default function Chat() {
                 return c
               })
 
-              // Sort most recently updated conversation to top
               return [...updated].sort(
                 (a, b) => new Date(b.updated_at) - new Date(a.updated_at)
               )
@@ -172,7 +263,6 @@ export default function Chat() {
       const list = res.messages || []
       setMessages(list)
 
-      // If there are unread incoming messages, mark conversation as read
       const hasUnread = list.some((m) => !m.is_mine && !m.is_read)
       if (hasUnread) {
         markChatAsRead(conversationId).catch(() => {})
@@ -192,12 +282,14 @@ export default function Chat() {
     }
   }, [activeConv?.id])
 
-  // Scroll to bottom on new message or history change
+  // Auto-scroll to bottom on new message
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+    if (!isSearching) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [messages, isSearching])
 
-  // 3. Authenticated WebSocket Connection Management
+  // 3. Authenticated Active Conversation WebSocket
   useEffect(() => {
     if (!activeConv) {
       if (wsRef.current) {
@@ -227,7 +319,6 @@ export default function Chat() {
       socket.onopen = () => {
         if (!isMounted) return
         setWsStatus('connected')
-        // Re-sync messages in case any were delivered during reconnect
         loadMessages(activeConv.id)
       }
 
@@ -235,6 +326,19 @@ export default function Chat() {
         if (!isMounted) return
         try {
           const payload = JSON.parse(event.data)
+
+          // 1. Typing indicator
+          if (payload.type === 'typing') {
+            const { conversation_id, user_id, user_name, is_typing } = payload
+            if (user?.id && String(user_id).toLowerCase() !== String(user.id).toLowerCase()) {
+              setTypingMap((prev) => ({
+                ...prev,
+                [conversation_id]: { isTyping: is_typing, userName: user_name },
+              }))
+            }
+          }
+
+          // 2. New message
           if (payload.type === 'new_message' && payload.message) {
             const newMsg = payload.message
             const isFromMe = Boolean(
@@ -244,16 +348,13 @@ export default function Chat() {
 
             if (isForActiveChat) {
               setMessages((prev) => {
-                // If real message already exists, do not duplicate
                 if (prev.some((m) => m.id === newMsg.id)) return prev
 
-                // If sent by me, reconcile with existing optimistic message
                 if (isFromMe) {
                   const tempIndex = prev.findIndex(
                     (m) =>
                       String(m.id).startsWith('temp-') &&
-                      m.content === newMsg.content &&
-                      String(m.sender_id).toLowerCase() === String(newMsg.sender_id).toLowerCase()
+                      (m.content === newMsg.content || m.media_url === newMsg.media_url)
                   )
                   if (tempIndex !== -1) {
                     const next = [...prev]
@@ -262,16 +363,9 @@ export default function Chat() {
                   }
                 }
 
-                return [
-                  ...prev,
-                  {
-                    ...newMsg,
-                    is_mine: isFromMe,
-                  },
-                ]
+                return [...prev, { ...newMsg, is_mine: isFromMe }]
               })
 
-              // If it's an incoming message while we're actively looking at this chat, mark it read!
               if (!isFromMe) {
                 if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
                   wsRef.current.send(JSON.stringify({ type: 'mark_read' }))
@@ -281,7 +375,7 @@ export default function Chat() {
               }
             }
 
-            // Update conversation snippet and unread counter in sidebar list
+            // Update sidebar
             setConversations((prev) =>
               prev.map((c) => {
                 if (c.id === newMsg.conversation_id) {
@@ -303,7 +397,7 @@ export default function Chat() {
             )
           }
 
-          // Handle real-time read receipt updates
+          // 3. Message read receipts
           if (payload.type === 'messages_read' && payload.conversation_id === activeConv.id) {
             setMessages((prev) =>
               prev.map((m) => {
@@ -313,6 +407,49 @@ export default function Chat() {
                 )
                 return isMine ? { ...m, is_read: true } : m
               })
+            )
+          }
+
+          // 4. Message Edited
+          if (payload.type === 'message_edited') {
+            const { message_id, content, is_edited, edited_at } = payload
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === message_id ? { ...m, content, is_edited: true, edited_at } : m
+              )
+            )
+          }
+
+          // 5. Message Deleted
+          if (payload.type === 'message_deleted') {
+            const { message_id, delete_type, deleted_by_user_id, is_deleted_everyone, content } = payload
+            const isMe = user?.id && String(deleted_by_user_id).toLowerCase() === String(user.id).toLowerCase()
+
+            setMessages((prev) => {
+              if (delete_type === 'me' && isMe) {
+                return prev.filter((m) => m.id !== message_id)
+              }
+              if (is_deleted_everyone) {
+                return prev.map((m) =>
+                  m.id === message_id
+                    ? {
+                        ...m,
+                        content: content || '🚫 This message was deleted',
+                        media_url: null,
+                        is_deleted_everyone: true,
+                      }
+                    : m
+                )
+              }
+              return prev
+            })
+          }
+
+          // 6. Message Reaction
+          if (payload.type === 'message_reaction') {
+            const { message_id, reactions } = payload
+            setMessages((prev) =>
+              prev.map((m) => (m.id === message_id ? { ...m, reactions } : m))
             )
           }
         } catch (err) {
@@ -327,8 +464,6 @@ export default function Chat() {
       socket.onclose = (event) => {
         if (!isMounted) return
         setWsStatus('disconnected')
-
-        // Auto-reconnect after 3 seconds if conversation is still open
         if (event.code !== 1008) {
           reconnectTimeoutRef.current = setTimeout(() => {
             if (isMounted && activeConv) {
@@ -351,16 +486,44 @@ export default function Chat() {
     }
   }, [activeConv?.id, user?.id])
 
-  // 4. Handle Sending a Message (Optimistic UI for Instant 0ms Feedback)
+  // Typing emitter handler
+  const handleInputChange = (e) => {
+    const val = e.target.value
+    setInputText(val)
+
+    if (!activeConv || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
+
+    if (!isTypingLocalRef.current) {
+      isTypingLocalRef.current = true
+      wsRef.current.send(JSON.stringify({ type: 'typing', is_typing: true }))
+    }
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current)
+    typingTimeoutRef.current = setTimeout(() => {
+      isTypingLocalRef.current = false
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'typing', is_typing: false }))
+      }
+    }, 2000)
+  }
+
+  // 4. Send Message (Text)
   const handleSendMessage = async (e) => {
-    e.preventDefault()
+    if (e) e.preventDefault()
     const content = inputText.trim()
     if (!content || !activeConv) return
 
-    // 1. Immediately clear input field
     setInputText('')
+    setShowEmojiPicker(false)
 
-    // 2. Generate optimistic message for zero-latency screen display
+    // Stop typing state immediately
+    if (isTypingLocalRef.current) {
+      isTypingLocalRef.current = false
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'typing', is_typing: false }))
+      }
+    }
+
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
     const nowIso = new Date().toISOString()
     const optimisticMsg = {
@@ -369,16 +532,15 @@ export default function Chat() {
       sender_id: user?.id,
       sender_name: user?.full_name,
       content: content,
+      message_type: 'text',
       created_at: nowIso,
       is_read: false,
       is_mine: true,
       pending: true,
     }
 
-    // 3. Immediately render in messages feed (0ms delay!)
     setMessages((prev) => [...prev, optimisticMsg])
 
-    // 4. Immediately update sidebar snippet & move chat to top
     setConversations((prev) => {
       const updated = prev.map((c) => {
         if (c.id === activeConv.id) {
@@ -396,12 +558,11 @@ export default function Chat() {
       return [...updated].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
     })
 
-    // 5. Send via WebSocket (or fallback REST)
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ content, temp_id: tempId }))
+      wsRef.current.send(JSON.stringify({ content, message_type: 'text', temp_id: tempId }))
     } else {
       try {
-        const savedMsg = await sendMessageRest(activeConv.id, content)
+        const savedMsg = await sendMessageRest(activeConv.id, content, 'text')
         setMessages((prev) =>
           prev.map((m) => (m.id === tempId ? { ...savedMsg, is_mine: true } : m))
         )
@@ -414,16 +575,212 @@ export default function Chat() {
     }
   }
 
+  // 5. Send Audio Message (Voice Note)
+  const handleSendAudio = async (base64AudioData, durationSecs) => {
+    if (!activeConv || !base64AudioData) return
+    setIsRecording(false)
+
+    const tempId = `temp-audio-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
+    const nowIso = new Date().toISOString()
+    const optimisticAudioMsg = {
+      id: tempId,
+      conversation_id: activeConv.id,
+      sender_id: user?.id,
+      sender_name: user?.full_name,
+      content: '🎙️ Voice note',
+      message_type: 'audio',
+      media_url: base64AudioData,
+      media_duration: durationSecs,
+      created_at: nowIso,
+      is_read: false,
+      is_mine: true,
+      pending: true,
+    }
+
+    setMessages((prev) => [...prev, optimisticAudioMsg])
+
+    setConversations((prev) => {
+      const updated = prev.map((c) => {
+        if (c.id === activeConv.id) {
+          return {
+            ...c,
+            last_message: {
+              ...optimisticAudioMsg,
+              is_mine: true,
+            },
+            updated_at: nowIso,
+          }
+        }
+        return c
+      })
+      return [...updated].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
+    })
+
+    const payload = {
+      content: '🎙️ Voice note',
+      message_type: 'audio',
+      media_url: base64AudioData,
+      media_duration: durationSecs,
+      temp_id: tempId,
+    }
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(payload))
+    } else {
+      try {
+        const saved = await sendMessageRest(
+          activeConv.id,
+          '🎙️ Voice note',
+          'audio',
+          base64AudioData,
+          durationSecs
+        )
+        setMessages((prev) =>
+          prev.map((m) => (m.id === tempId ? { ...saved, is_mine: true } : m))
+        )
+      } catch (err) {
+        console.error('Failed to send voice note via REST:', err)
+        setMessages((prev) =>
+          prev.map((m) => (m.id === tempId ? { ...m, failed: true } : m))
+        )
+      }
+    }
+  }
+
+  // 6. Handle Reaction
+  const handleToggleReaction = async (messageId, emoji) => {
+    if (!activeConv) return
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'reaction', message_id: messageId, emoji }))
+    } else {
+      try {
+        const updated = await toggleReactionRest(activeConv.id, messageId, emoji)
+        setMessages((prev) =>
+          prev.map((m) => (m.id === messageId ? { ...m, reactions: updated.reactions } : m))
+        )
+      } catch (err) {
+        console.error('Reaction failed:', err)
+      }
+    }
+  }
+
+  // 7. Handle Edit Message Submit
+  const handleSaveEdit = async () => {
+    if (!editingMessage || !editingMessage.content.trim() || !activeConv) return
+    const { id, content } = editingMessage
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({ type: 'edit_message', message_id: id, content: content.trim() })
+      )
+    } else {
+      try {
+        await editMessageRest(activeConv.id, id, content.trim())
+      } catch (err) {
+        console.error('Edit failed:', err)
+      }
+    }
+    setEditingMessage(null)
+  }
+
+  // 8. Handle Delete Message Submit
+  const handleExecuteDelete = async (deleteType) => {
+    if (!deleteModalMsg || !activeConv) return
+    const { id } = deleteModalMsg
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({ type: 'delete_message', message_id: id, delete_type: deleteType })
+      )
+    } else {
+      try {
+        await deleteMessageRest(activeConv.id, id, deleteType)
+      } catch (err) {
+        console.error('Delete failed:', err)
+      }
+    }
+
+    if (deleteType === 'me') {
+      setMessages((prev) => prev.filter((m) => m.id !== id))
+    }
+    setDeleteModalMsg(null)
+  }
+
+  // Search matches
+  const searchMatches = useMemo(() => {
+    if (!searchQuery.trim()) return []
+    const q = searchQuery.toLowerCase()
+    const matches = []
+    messages.forEach((m, idx) => {
+      if (m.content && m.content.toLowerCase().includes(q)) {
+        matches.push({ index: idx, id: m.id })
+      }
+    })
+    return matches
+  }, [messages, searchQuery])
+
+  useEffect(() => {
+    if (searchMatches.length > 0) {
+      setCurrentSearchIdx(0)
+      scrollToMatch(searchMatches[0]?.id)
+    }
+  }, [searchMatches])
+
+  const scrollToMatch = (msgId) => {
+    if (!msgId) return
+    const el = messageItemRefs.current[msgId]
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }
+
+  const handleNextSearchMatch = () => {
+    if (searchMatches.length === 0) return
+    const nextIdx = (currentSearchIdx + 1) % searchMatches.length
+    setCurrentSearchIdx(nextIdx)
+    scrollToMatch(searchMatches[nextIdx]?.id)
+  }
+
+  const handlePrevSearchMatch = () => {
+    if (searchMatches.length === 0) return
+    const prevIdx = (currentSearchIdx - 1 + searchMatches.length) % searchMatches.length
+    setCurrentSearchIdx(prevIdx)
+    scrollToMatch(searchMatches[prevIdx]?.id)
+  }
+
+  // Helper to highlight matching text
+  const renderMessageContent = (text, isDeleted) => {
+    if (isDeleted) {
+      return <span className="deleted-message-text">{text}</span>
+    }
+    if (!searchQuery.trim() || !text) return text
+
+    const parts = text.split(new RegExp(`(${searchQuery.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')})`, 'gi'))
+    return parts.map((part, i) =>
+      part.toLowerCase() === searchQuery.toLowerCase() ? (
+        <mark key={i} className="search-highlight">
+          {part}
+        </mark>
+      ) : (
+        part
+      )
+    )
+  }
+
   // Switch Conversation
   const handleSelectConv = (conv) => {
     setActiveConv(conv)
     setSearchParams({ id: conv.id })
     setShowMobileList(false)
-    // Clear unread badge locally for the opened conversation
+    setIsSearching(false)
+    setSearchQuery('')
     setConversations((prev) =>
       prev.map((c) => (c.id === conv.id ? { ...c, unread_count: 0 } : c))
     )
   }
+
+  const isOtherTyping = activeConv && typingMap[activeConv.id]?.isTyping
+  const otherParticipant = activeConv?.other_participant
 
   return (
     <div className="chat-container">
@@ -452,15 +809,22 @@ export default function Chat() {
             {conversations.map((c) => {
               const other = c.other_participant
               const isSelected = activeConv?.id === c.id
+              const isConvTyping = typingMap[c.id]?.isTyping
+              const isUserOnline = other?.is_online
+
               return (
                 <div
                   key={c.id}
                   className={`conv-item ${isSelected ? 'active' : ''}`}
                   onClick={() => handleSelectConv(c)}
                 >
-                  <div className="conv-avatar">
-                    {other?.display_name?.charAt(0).toUpperCase()}
+                  <div className="conv-avatar-wrapper">
+                    <div className="conv-avatar">
+                      {other?.display_name?.charAt(0).toUpperCase()}
+                    </div>
+                    {isUserOnline && <span className="avatar-online-dot" title="Online" />}
                   </div>
+
                   <div className="conv-meta">
                     <div className="conv-title-row">
                       <h4>{other?.display_name}</h4>
@@ -473,15 +837,27 @@ export default function Chat() {
                         </span>
                       )}
                     </div>
-                    {other?.display_name !== other?.original_name && (
-                      <span className="contact-tag">Alias: {other?.display_name}</span>
-                    )}
+
                     <div className="conv-subtitle-row">
-                      <p className="conv-preview">
-                        {c.last_message
-                          ? `${c.last_message.is_mine ? 'You: ' : ''}${c.last_message.content}`
-                          : 'No messages yet'}
-                      </p>
+                      {isConvTyping ? (
+                        <p className="conv-typing-status">
+                          <span className="typing-dots-anim">•••</span> typing...
+                        </p>
+                      ) : (
+                        <p className="conv-preview">
+                          {c.last_message ? (
+                            <>
+                              {c.last_message.is_mine ? 'You: ' : ''}
+                              {c.last_message.message_type === 'audio'
+                                ? '🎙️ Voice note'
+                                : c.last_message.content}
+                            </>
+                          ) : (
+                            'No messages yet'
+                          )}
+                        </p>
+                      )}
+
                       {c.unread_count > 0 && (
                         <span className="unread-badge" title={`${c.unread_count} unread messages`}>
                           {c.unread_count}
@@ -510,30 +886,112 @@ export default function Chat() {
               >
                 ←
               </button>
-              <div className="header-avatar">
-                {activeConv.other_participant?.display_name?.charAt(0).toUpperCase()}
+
+              <div className="header-avatar-wrapper">
+                <div className="header-avatar">
+                  {otherParticipant?.display_name?.charAt(0).toUpperCase()}
+                </div>
+                {otherParticipant?.is_online && (
+                  <span className="header-avatar-online-dot" title="Online" />
+                )}
               </div>
+
               <div className="header-info">
-                <h3>{activeConv.other_participant?.display_name}</h3>
-                <span className="header-sub">
-                  {activeConv.other_participant?.email}
-                  {activeConv.other_participant?.display_name !== activeConv.other_participant?.original_name && (
-                    <> • (Original: {activeConv.other_participant?.original_name})</>
+                <h3>{otherParticipant?.display_name}</h3>
+                <div className="header-status-line">
+                  {isOtherTyping ? (
+                    <span className="header-typing-indicator">
+                      <span className="typing-pulse-dot" /> typing...
+                    </span>
+                  ) : otherParticipant?.is_online ? (
+                    <span className="header-online-status">
+                      <span className="online-green-dot" /> Online
+                    </span>
+                  ) : (
+                    <span className="header-last-seen">
+                      {formatLastSeen(otherParticipant?.last_seen_at)}
+                    </span>
                   )}
-                </span>
+                </div>
               </div>
-              <div className="ws-status-badge">
-                {wsStatus === 'connected' && (
-                  <span className="badge badge-success">🟢 Live</span>
-                )}
-                {wsStatus === 'connecting' && (
-                  <span className="badge badge-pending">🟡 Connecting...</span>
-                )}
-                {wsStatus === 'disconnected' && (
-                  <span className="badge badge-error">🔴 Reconnecting...</span>
-                )}
+
+              {/* In-Chat Search & Status Actions */}
+              <div className="chat-header-actions">
+                <button
+                  type="button"
+                  className={`chat-header-btn ${isSearching ? 'active' : ''}`}
+                  onClick={() => {
+                    setIsSearching((prev) => !prev)
+                    if (isSearching) setSearchQuery('')
+                  }}
+                  title="Search messages in this chat"
+                >
+                  🔍
+                </button>
+
+                <div className="ws-status-badge">
+                  {wsStatus === 'connected' && (
+                    <span className="badge badge-success">🟢 Live</span>
+                  )}
+                  {wsStatus === 'connecting' && (
+                    <span className="badge badge-pending">🟡 Connecting...</span>
+                  )}
+                  {wsStatus === 'disconnected' && (
+                    <span className="badge badge-error">🔴 Reconnecting...</span>
+                  )}
+                </div>
               </div>
             </header>
+
+            {/* In-Chat Search Bar Drawer */}
+            {isSearching && (
+              <div className="in-chat-search-bar">
+                <span className="search-icon-prefix">🔍</span>
+                <input
+                  type="text"
+                  placeholder="Search in conversation..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  autoFocus
+                />
+                {searchQuery.trim() && (
+                  <span className="search-match-count">
+                    {searchMatches.length > 0
+                      ? `${currentSearchIdx + 1} of ${searchMatches.length}`
+                      : 'No matches'}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="search-nav-btn"
+                  onClick={handlePrevSearchMatch}
+                  disabled={searchMatches.length === 0}
+                  title="Previous match"
+                >
+                  ▲
+                </button>
+                <button
+                  type="button"
+                  className="search-nav-btn"
+                  onClick={handleNextSearchMatch}
+                  disabled={searchMatches.length === 0}
+                  title="Next match"
+                >
+                  ▼
+                </button>
+                <button
+                  type="button"
+                  className="search-close-btn"
+                  onClick={() => {
+                    setIsSearching(false)
+                    setSearchQuery('')
+                  }}
+                  title="Close search"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
 
             {/* Messages Feed */}
             <div className="messages-feed">
@@ -543,7 +1001,10 @@ export default function Chat() {
                 <div className="messages-empty">
                   <div className="empty-chat-icon">👋</div>
                   <h4>No messages here yet</h4>
-                  <p>Send a message below to start your private conversation with {activeConv.other_participant?.display_name}!</p>
+                  <p>
+                    Send a message or voice note below to start your conversation with{' '}
+                    {otherParticipant?.display_name}!
+                  </p>
                 </div>
               ) : (
                 messages.map((m) => {
@@ -551,26 +1012,116 @@ export default function Chat() {
                     m.is_mine === true ||
                     (user?.id && String(m.sender_id).toLowerCase() === String(user.id).toLowerCase())
                   )
+                  const isHovered = hoveredMsgId === m.id
+                  const isMenuOpen = activeMenuMsgId === m.id
+                  const isEditingThis = editingMessage?.id === m.id
+                  const isDeleted = m.is_deleted_everyone
+
+                  // Group reactions by emoji
+                  const reactionCounts = {}
+                  if (m.reactions && Array.isArray(m.reactions)) {
+                    m.reactions.forEach((r) => {
+                      if (!reactionCounts[r.emoji]) {
+                        reactionCounts[r.emoji] = { count: 0, hasMine: false, users: [] }
+                      }
+                      reactionCounts[r.emoji].count += 1
+                      reactionCounts[r.emoji].users.push(r.user_name || 'Someone')
+                      if (user?.id && String(r.user_id) === String(user.id)) {
+                        reactionCounts[r.emoji].hasMine = true
+                      }
+                    })
+                  }
+
                   return (
                     <div
                       key={m.id}
+                      ref={(el) => (messageItemRefs.current[m.id] = el)}
                       className={`message-bubble-row ${isMine ? 'outgoing' : 'incoming'}`}
+                      onMouseEnter={() => setHoveredMsgId(m.id)}
+                      onMouseLeave={() => setHoveredMsgId(null)}
                     >
-                      <div className={`message-bubble ${isMine ? 'bubble-outgoing' : 'bubble-incoming'}`}>
+                      {/* Floating Quick Reaction Bar */}
+                      {!isDeleted && isHovered && (
+                        <MessageReactionBar
+                          onReact={(emoji) => handleToggleReaction(m.id, emoji)}
+                        />
+                      )}
+
+                      <div
+                        className={`message-bubble ${isMine ? 'bubble-outgoing' : 'bubble-incoming'} ${
+                          isDeleted ? 'bubble-deleted' : ''
+                        }`}
+                      >
                         {!isMine && (
                           <div className="message-sender-label">
-                            {activeConv.other_participant?.display_name || m.sender_name}
+                            {otherParticipant?.display_name || m.sender_name}
                           </div>
                         )}
-                        <div className="message-text">{m.content}</div>
+
+                        {/* Inline Edit Mode */}
+                        {isEditingThis ? (
+                          <div className="inline-edit-box">
+                            <input
+                              type="text"
+                              value={editingMessage.content}
+                              onChange={(e) =>
+                                setEditingMessage({ ...editingMessage, content: e.target.value })
+                              }
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveEdit()
+                                if (e.key === 'Escape') setEditingMessage(null)
+                              }}
+                            />
+                            <div className="inline-edit-actions">
+                              <button
+                                type="button"
+                                className="btn-edit-save"
+                                onClick={handleSaveEdit}
+                                title="Save changes"
+                              >
+                                ✓
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-edit-cancel"
+                                onClick={() => setEditingMessage(null)}
+                                title="Cancel"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          </div>
+                        ) : m.message_type === 'audio' && m.media_url && !isDeleted ? (
+                          /* Voice Note Message */
+                          <AudioMessagePlayer
+                            mediaUrl={m.media_url}
+                            duration={m.media_duration}
+                            isMine={isMine}
+                          />
+                        ) : (
+                          /* Standard Text Message */
+                          <div className="message-text">
+                            {renderMessageContent(m.content, isDeleted)}
+                          </div>
+                        )}
+
+                        {/* Message Meta (Time, Edited tag, Ticks & 3-dots action menu) */}
                         <div className="message-meta">
+                          {m.is_edited && !isDeleted && (
+                            <span className="edited-badge" title="Edited message">
+                              (edited)
+                            </span>
+                          )}
+
                           <span className="message-time">
                             {new Date(m.created_at).toLocaleTimeString([], {
                               hour: '2-digit',
                               minute: '2-digit',
                             })}
                           </span>
-                          {isMine && (
+
+                          {isMine && !isDeleted && (
                             <span
                               className={`message-ticks ${m.is_read ? 'ticks-read' : 'ticks-sent'}`}
                               title={m.is_read ? 'Seen' : 'Sent'}
@@ -578,7 +1129,72 @@ export default function Chat() {
                               {m.is_read ? '✓✓' : '✓'}
                             </span>
                           )}
+
+                          {/* 3-dots action menu trigger */}
+                          {!isDeleted && (
+                            <div className="msg-menu-container">
+                              <button
+                                type="button"
+                                className="msg-menu-trigger"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setActiveMenuMsgId(isMenuOpen ? null : m.id)
+                                }}
+                                title="Message options"
+                              >
+                                ⋮
+                              </button>
+
+                              {isMenuOpen && (
+                                <div
+                                  className="msg-menu-dropdown"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {isMine && m.message_type === 'text' && (
+                                    <button
+                                      type="button"
+                                      className="msg-menu-item"
+                                      onClick={() => {
+                                        setEditingMessage({ id: m.id, content: m.content })
+                                        setActiveMenuMsgId(null)
+                                      }}
+                                    >
+                                      ✏️ Edit
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    className="msg-menu-item text-danger"
+                                    onClick={() => {
+                                      setDeleteModalMsg({ id: m.id, isMine })
+                                      setActiveMenuMsgId(null)
+                                    }}
+                                  >
+                                    🗑️ Delete
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
+
+                        {/* Reaction Badges on Bubble */}
+                        {Object.keys(reactionCounts).length > 0 && (
+                          <div className="bubble-reactions-row">
+                            {Object.entries(reactionCounts).map(([emoji, data]) => (
+                              <button
+                                key={emoji}
+                                type="button"
+                                className={`reaction-pill ${data.hasMine ? 'active' : ''}`}
+                                onClick={() => handleToggleReaction(m.id, emoji)}
+                                title={data.users.join(', ')}
+                              >
+                                <span>{emoji}</span>
+                                {data.count > 1 && <span className="r-count">{data.count}</span>}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )
@@ -587,29 +1203,110 @@ export default function Chat() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input & Send Form */}
-            <form onSubmit={handleSendMessage} className="chat-input-form">
-              <input
-                type="text"
-                placeholder="Type a message..."
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                autoFocus
-              />
-              <button
-                type="submit"
-                className="send-btn"
-                disabled={!inputText.trim()}
-              >
-                Send 🚀
-              </button>
-            </form>
+            {/* Delete Confirmation Modal */}
+            {deleteModalMsg && (
+              <div className="modal-backdrop" onClick={() => setDeleteModalMsg(null)}>
+                <div className="modal-card-small" onClick={(e) => e.stopPropagation()}>
+                  <h4>Delete message?</h4>
+                  <p>Choose how you want to delete this message:</p>
+                  <div className="modal-actions-col">
+                    {deleteModalMsg.isMine && (
+                      <button
+                        type="button"
+                        className="button button-danger"
+                        onClick={() => handleExecuteDelete('everyone')}
+                      >
+                        Delete for everyone
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => handleExecuteDelete('me')}
+                    >
+                      Delete for me
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-outline"
+                      onClick={() => setDeleteModalMsg(null)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Input & Send Bar / Voice Recorder Bar */}
+            <div className="chat-bottom-bar-wrapper">
+              {showEmojiPicker && (
+                <EmojiPicker
+                  onSelectEmoji={(emoji) => setInputText((prev) => prev + emoji)}
+                  onClose={() => setShowEmojiPicker(false)}
+                />
+              )}
+
+              {isRecording ? (
+                <VoiceRecorderBar
+                  onSendAudio={handleSendAudio}
+                  onCancel={() => setIsRecording(false)}
+                />
+              ) : (
+                <form onSubmit={handleSendMessage} className="chat-input-bar">
+                  {/* Emoji Trigger Button */}
+                  <button
+                    type="button"
+                    className={`input-emoji-btn ${showEmojiPicker ? 'active' : ''}`}
+                    onClick={() => setShowEmojiPicker((prev) => !prev)}
+                    title="Insert emoji"
+                  >
+                    😊
+                  </button>
+
+                  {/* Text Input Pill */}
+                  <input
+                    type="text"
+                    className="chat-text-input"
+                    placeholder="Type a message..."
+                    value={inputText}
+                    onChange={handleInputChange}
+                    autoFocus
+                  />
+
+                  {/* Send or Mic Action Button */}
+                  {inputText.trim() ? (
+                    <button
+                      type="submit"
+                      className="action-circle-btn send-active"
+                      title="Send message"
+                      aria-label="Send message"
+                    >
+                      ➤
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="action-circle-btn mic-btn"
+                      onClick={() => setIsRecording(true)}
+                      title="Record voice note"
+                      aria-label="Record voice note"
+                    >
+                      🎙️
+                    </button>
+                  )}
+                </form>
+              )}
+            </div>
           </>
         ) : (
           <div className="no-chat-selected">
             <div className="empty-icon">💬</div>
             <h3>Your Private Messages</h3>
-            <p>Select an existing conversation from the left, or visit the Dashboard to search for a user and start a new conversation.</p>
+            <p>
+              Select an existing conversation from the left, or visit the Dashboard to search for a user
+              and start a new conversation.
+            </p>
             <button
               type="button"
               className="button button-primary"
@@ -624,4 +1321,3 @@ export default function Chat() {
     </div>
   )
 }
-

@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from typing import List, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING
 from sqlalchemy import String, Boolean, DateTime, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
@@ -54,6 +54,10 @@ class User(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
+    )
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )
 
     # Relationships

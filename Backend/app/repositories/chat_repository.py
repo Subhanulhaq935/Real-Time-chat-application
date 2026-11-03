@@ -100,17 +100,29 @@ class ChatRepository:
         stmt = select(func.count(Message.id)).where(Message.conversation_id == conversation_id)
         return self.db.execute(stmt).scalar_one()
 
+    def get_message_by_id(self, message_id: uuid.UUID) -> Optional[Message]:
+        stmt = select(Message).options(joinedload(Message.sender)).where(Message.id == message_id)
+        return self.db.execute(stmt).scalar_one_or_none()
+
     def save_message(
         self,
         conversation_id: uuid.UUID,
         sender_id: uuid.UUID,
         content: str,
+        message_type: str = "text",
+        media_url: Optional[str] = None,
+        media_duration: Optional[int] = None,
     ) -> Message:
         now = datetime.now(timezone.utc)
         message = Message(
             conversation_id=conversation_id,
             sender_id=sender_id,
-            content=content.strip(),
+            content=content.strip() if content else "",
+            message_type=message_type,
+            media_url=media_url,
+            media_duration=media_duration,
+            reactions=[],
+            deleted_by_users=[],
             created_at=now,
         )
         self.db.add(message)
@@ -123,6 +135,62 @@ class ChatRepository:
         self.db.commit()
         self.db.refresh(message)
         return message
+
+    def edit_message(self, message_id: uuid.UUID, new_content: str) -> Optional[Message]:
+        msg = self.get_message_by_id(message_id)
+        if msg:
+            msg.content = new_content.strip()
+            msg.is_edited = True
+            msg.edited_at = datetime.now(timezone.utc)
+            self.db.commit()
+            self.db.refresh(msg)
+        return msg
+
+    def delete_message_everyone(self, message_id: uuid.UUID) -> Optional[Message]:
+        msg = self.get_message_by_id(message_id)
+        if msg:
+            msg.is_deleted_everyone = True
+            msg.content = "🚫 This message was deleted"
+            msg.media_url = None
+            self.db.commit()
+            self.db.refresh(msg)
+        return msg
+
+    def delete_message_for_me(self, message_id: uuid.UUID, user_id: uuid.UUID) -> Optional[Message]:
+        msg = self.get_message_by_id(message_id)
+        if msg:
+            users = list(msg.deleted_by_users or [])
+            uid_str = str(user_id)
+            if uid_str not in users:
+                users.append(uid_str)
+                msg.deleted_by_users = users
+                self.db.commit()
+                self.db.refresh(msg)
+        return msg
+
+    def add_or_toggle_reaction(
+        self,
+        message_id: uuid.UUID,
+        user_id: uuid.UUID,
+        user_name: str,
+        emoji: str,
+    ) -> Optional[Message]:
+        msg = self.get_message_by_id(message_id)
+        if msg:
+            current_reactions = list(msg.reactions or [])
+            uid_str = str(user_id)
+            filtered = [r for r in current_reactions if r.get("user_id") != uid_str]
+            already_had_same = any(r.get("user_id") == uid_str and r.get("emoji") == emoji for r in current_reactions)
+            if not already_had_same:
+                filtered.append({
+                    "emoji": emoji,
+                    "user_id": uid_str,
+                    "user_name": user_name,
+                })
+            msg.reactions = filtered
+            self.db.commit()
+            self.db.refresh(msg)
+        return msg
 
     def mark_messages_as_read(
         self,

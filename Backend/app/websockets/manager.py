@@ -55,6 +55,29 @@ class ConnectionManager:
             if not self.user_sockets[user_id]:
                 del self.user_sockets[user_id]
 
+    def is_user_online(self, user_id: str) -> bool:
+        uid = str(user_id)
+        return uid in self.user_sockets and len(self.user_sockets[uid]) > 0
+
+    async def broadcast_user_status(self, user_id: str, is_online: bool, last_seen_at: str | None = None):
+        payload = {
+            "type": "user_status",
+            "user_id": str(user_id),
+            "is_online": is_online,
+            "last_seen_at": last_seen_at,
+        }
+        dead_connections: List[tuple] = []
+        for uid, sockets in list(self.user_sockets.items()):
+            for ws in list(sockets):
+                try:
+                    await ws.send_json(payload)
+                except Exception:
+                    dead_connections.append((uid, ws))
+
+        for uid, ws in dead_connections:
+            if uid in self.user_sockets and ws in self.user_sockets[uid]:
+                self.user_sockets[uid].remove(ws)
+
     async def broadcast_to_conversation(
         self,
         conversation_id: str,

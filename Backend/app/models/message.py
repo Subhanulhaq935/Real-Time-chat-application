@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
-from sqlalchemy import Boolean, DateTime, ForeignKey, Text, Uuid
+from typing import TYPE_CHECKING, Optional, List
+from sqlalchemy import Boolean, DateTime, ForeignKey, Text, Uuid, String, Integer, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
@@ -33,6 +33,43 @@ class Message(Base):
     content: Mapped[str] = mapped_column(
         Text,
         nullable=False,
+    )
+    message_type: Mapped[str] = mapped_column(
+        String(20),
+        default="text",
+        nullable=False,
+    )
+    media_url: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    media_duration: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    reactions: Mapped[Optional[list]] = mapped_column(
+        JSON,
+        default=list,
+        nullable=True,
+    )
+    is_deleted_everyone: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+    deleted_by_users: Mapped[Optional[list]] = mapped_column(
+        JSON,
+        default=list,
+        nullable=True,
+    )
+    is_edited: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+    edited_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )
     is_read: Mapped[bool] = mapped_column(
         Boolean,
