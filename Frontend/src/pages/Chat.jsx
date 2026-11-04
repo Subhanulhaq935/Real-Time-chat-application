@@ -807,32 +807,31 @@ export default function Chat() {
       return [...updated].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
     })
 
-    const payload = {
-      content: '🎙️ Voice note',
-      message_type: 'audio',
-      media_url: base64AudioData,
-      media_duration: durationSecs,
-      temp_id: tempId,
-    }
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(payload))
-    } else {
-      try {
-        const saved = await sendMessageRest(
-          activeConv.id,
-          '🎙️ Voice note',
-          'audio',
-          base64AudioData,
-          durationSecs
-        )
+    try {
+      const saved = await sendMessageRest(
+        activeConv.id,
+        '🎙️ Voice note',
+        'audio',
+        base64AudioData,
+        durationSecs
+      )
+      setMessages((prev) =>
+        prev.map((m) => (m.id === tempId ? { ...saved, is_mine: true } : m))
+      )
+    } catch (err) {
+      console.error('Failed to send voice note via REST, attempting WebSocket fallback:', err)
+      const payload = {
+        content: '🎙️ Voice note',
+        message_type: 'audio',
+        media_url: base64AudioData,
+        media_duration: durationSecs,
+        temp_id: tempId,
+      }
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify(payload))
+      } else {
         setMessages((prev) =>
-          prev.map((m) => (m.id === tempId ? { ...saved, is_mine: true } : m))
-        )
-      } catch (err) {
-        console.error('Failed to send voice note via REST:', err)
-        setMessages((prev) =>
-          prev.map((m) => (m.id === tempId ? { ...m, failed: true } : m))
+          prev.map((m) => (m.id === tempId ? { ...m, failed: true, pending: false } : m))
         )
       }
     }

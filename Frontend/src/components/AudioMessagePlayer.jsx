@@ -1,18 +1,32 @@
 import React, { useState, useRef, useEffect } from 'react'
 
-function dataURItoBlob(dataURI) {
+async function dataURItoBlobAsync(dataURI) {
+  if (!dataURI) return null
+  if (!dataURI.startsWith('data:')) return null
+
+  // Fast path: use native fetch which handles base64 parsing in native code
   try {
-    if (!dataURI || !dataURI.includes(',')) return null
-    const parts = dataURI.split(',')
-    const mimeMatch = parts[0].match(/:(.*?);/)
-    const mime = mimeMatch ? mimeMatch[1] : 'audio/webm'
-    const byteString = atob(parts[1])
-    const ab = new ArrayBuffer(byteString.length)
-    const ia = new Uint8Array(ab)
-    for (let i = 0; i < byteString.length; i++) {
-      ia[i] = byteString.charCodeAt(i)
+    const res = await fetch(dataURI)
+    if (res.ok) {
+      return await res.blob()
     }
-    return new Blob([ab], { type: mime })
+  } catch (e) {
+    // Fall back to manual decoding if fetch fails
+  }
+
+  try {
+    const parts = dataURI.split(',')
+    if (parts.length < 2) return null
+    const mimeMatch = parts[0].match(/data:(.*?);base64/)
+    const mime = mimeMatch ? mimeMatch[1] : 'audio/webm'
+    const cleanBase64 = parts[1].trim().replace(/\s/g, '')
+    const binaryStr = atob(cleanBase64)
+    const len = binaryStr.length
+    const bytes = new Uint8Array(len)
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryStr.charCodeAt(i)
+    }
+    return new Blob([bytes], { type: mime })
   } catch (err) {
     console.warn('dataURItoBlob conversion error:', err)
     return null
@@ -29,24 +43,35 @@ export default function AudioMessagePlayer({ mediaUrl, duration, isMine }) {
 
   const audioRef = useRef(null)
 
-  // Convert base64 Data URI to Blob URL so browsers (Chrome, Safari, Firefox) can buffer and seek reliably
+  // Convert base64 Data URI to Blob URL so browsers (Chrome, Safari, Firefox) can buffer and play reliably
   useEffect(() => {
     if (!mediaUrl) return
 
     let objectUrl = ''
-    if (mediaUrl.startsWith('data:')) {
-      const blob = dataURItoBlob(mediaUrl)
-      if (blob) {
-        objectUrl = URL.createObjectURL(blob)
-        setBlobSrc(objectUrl)
+    let isCancelled = false
+
+    const prepareAudio = async () => {
+      if (mediaUrl.startsWith('data:')) {
+        const blob = await dataURItoBlobAsync(mediaUrl)
+        if (!isCancelled) {
+          if (blob) {
+            objectUrl = URL.createObjectURL(blob)
+            setBlobSrc(objectUrl)
+          } else {
+            setBlobSrc(mediaUrl)
+          }
+        }
       } else {
-        setBlobSrc(mediaUrl)
+        if (!isCancelled) {
+          setBlobSrc(mediaUrl)
+        }
       }
-    } else {
-      setBlobSrc(mediaUrl)
     }
 
+    prepareAudio()
+
     return () => {
+      isCancelled = true
       if (objectUrl) {
         URL.revokeObjectURL(objectUrl)
       }
@@ -58,6 +83,16 @@ export default function AudioMessagePlayer({ mediaUrl, duration, isMine }) {
       setTotalDuration(duration)
     }
   }, [duration])
+
+  // Explicitly load audio when source URL is set
+  useEffect(() => {
+    const audio = audioRef.current
+    if (audio && blobSrc) {
+      try {
+        audio.load()
+      } catch (e) {}
+    }
+  }, [blobSrc])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -88,7 +123,7 @@ export default function AudioMessagePlayer({ mediaUrl, duration, isMine }) {
     }
 
     const handleError = (e) => {
-      console.warn('Audio element error:', e)
+      console.warn('Audio element error event:', e)
       setIsPlaying(false)
       setPlayError(true)
     }
@@ -108,7 +143,7 @@ export default function AudioMessagePlayer({ mediaUrl, duration, isMine }) {
     }
   }, [blobSrc, totalDuration])
 
-  const togglePlay = () => {
+  const togglePlay = async () => {
     const audio = audioRef.current
     if (!audio) return
 
@@ -121,21 +156,26 @@ export default function AudioMessagePlayer({ mediaUrl, duration, isMine }) {
 
       // If at end or near end, restart from beginning
       if (audio.ended || (totalDuration > 0 && audio.currentTime >= totalDuration - 0.2)) {
-        audio.currentTime = 0
+        try {
+          audio.currentTime = 0
+        } catch (e) {}
         setCurrentTime(0)
       }
 
-      const playPromise = audio.play()
-      if (playPromise !== undefined) {
-        playPromise
-          .then(() => {
-            setIsPlaying(true)
-          })
-          .catch((err) => {
-            console.error('Audio playback failed:', err)
-            setIsPlaying(false)
-            setPlayError(true)
-          })
+      try {
+        await audio.play()
+        setIsPlaying(true)
+      } catch (err) {
+        console.warn('Initial audio playback attempt failed, reloading source:', err)
+        try {
+          audio.load()
+          await audio.play()
+          setIsPlaying(true)
+        } catch (retryErr) {
+          console.error('Audio playback retry failed:', retryErr)
+          setIsPlaying(false)
+          setPlayError(true)
+        }
       }
     }
   }
@@ -151,8 +191,14 @@ export default function AudioMessagePlayer({ mediaUrl, duration, isMine }) {
     const newFraction = Math.max(0, Math.min(1, clickX / rect.width))
     const newTime = newFraction * dur
 
-    audio.currentTime = newTime
-    setCurrentTime(newTime)
+    if (isFinite(newTime)) {
+      try {
+        audio.currentTime = newTime
+      } catch (err) {
+        console.warn('Seek error:', err)
+      }
+      setCurrentTime(newTime)
+    }
   }
 
   const toggleRate = () => {

@@ -7,6 +7,7 @@ export default function VoiceRecorderBar({ onSendAudio, onCancel }) {
   const audioChunksRef = useRef([])
   const streamRef = useRef(null)
   const timerRef = useRef(null)
+  const startTimeRef = useRef(Date.now())
   const isStoppedRef = useRef(false)
 
   useEffect(() => {
@@ -50,6 +51,7 @@ export default function VoiceRecorderBar({ onSendAudio, onCancel }) {
         const mediaRecorder = new MediaRecorder(stream, options)
         mediaRecorderRef.current = mediaRecorder
         audioChunksRef.current = []
+        startTimeRef.current = Date.now()
 
         mediaRecorder.ondataavailable = (e) => {
           if (e.data && e.data.size > 0) {
@@ -57,15 +59,15 @@ export default function VoiceRecorderBar({ onSendAudio, onCancel }) {
           }
         }
 
-        // Slice every 200ms so data is constantly accumulated
-        mediaRecorder.start(200)
+        // Slice every 250ms to accumulate audio data smoothly
+        mediaRecorder.start(250)
         setIsRecording(true)
 
         timerRef.current = setInterval(() => {
           setSeconds((prev) => prev + 1)
         }, 1000)
       } catch (err) {
-        console.error('Microphone error:', err)
+        console.error('Microphone access error:', err)
         alert('Microphone access is needed to record voice notes. Please allow microphone permission.')
         onCancel()
       }
@@ -93,14 +95,15 @@ export default function VoiceRecorderBar({ onSendAudio, onCancel }) {
       recorder.onstop = () => {
         const mime = recorder.mimeType || 'audio/webm'
         const audioBlob = new Blob(audioChunksRef.current, { type: mime })
+        const elapsedSecs = Math.max(1, Math.round((Date.now() - startTimeRef.current) / 1000))
 
-        // Stop microphone stream tracks
+        // Stop microphone stream tracks immediately to release hardware
         if (streamRef.current) {
           streamRef.current.getTracks().forEach((t) => t.stop())
         }
 
-        if (audioBlob.size === 0) {
-          alert('Recording had no audio. Please try again.')
+        if (audioBlob.size < 50) {
+          alert('Recording was too short or empty. Please try again.')
           onCancel()
           return
         }
@@ -108,19 +111,16 @@ export default function VoiceRecorderBar({ onSendAudio, onCancel }) {
         const reader = new FileReader()
         reader.onloadend = () => {
           const base64Data = reader.result
-          onSendAudio(base64Data, Math.max(1, seconds))
+          if (base64Data) {
+            onSendAudio(base64Data, elapsedSecs)
+          } else {
+            onCancel()
+          }
         }
         reader.readAsDataURL(audioBlob)
       }
 
-      // Force flush any remaining buffered audio bytes before stopping
-      try {
-        if (recorder.state === 'recording') {
-          recorder.requestData()
-        }
-      } catch (err) {
-        console.warn('requestData error:', err)
-      }
+      // Stopping the recorder will automatically trigger the final ondataavailable and onstop
       recorder.stop()
     } else {
       onCancel()
