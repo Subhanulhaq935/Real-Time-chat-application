@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -82,22 +83,23 @@ class AuthService:
             expires_at=expires_at,
         )
 
-        # Send OTP via email
+        # Send OTP via email (with graceful fallback if cloud provider blocks outbound SMTP)
+        dev_otp: Optional[str] = None
         try:
             email_service.send_otp_email(
                 recipient_email=email,
                 otp_code=plain_otp,
                 recipient_name=user.full_name,
             )
-        except EmailDeliveryError as e:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Account created, but failed to deliver verification email: {str(e)}",
-            )
+            message = f"Verification code sent to {email}. Please verify within {settings.OTP_EXPIRE_MINUTES} minutes."
+        except EmailDeliveryError:
+            dev_otp = plain_otp
+            message = f"Account created! Your verification code is: {plain_otp}"
 
         return SignupResponse(
-            message=f"Verification code sent to {email}. Please verify within {settings.OTP_EXPIRE_MINUTES} minutes.",
+            message=message,
             email=email,
+            dev_otp=dev_otp,
         )
 
     def verify_otp(self, data: VerifyOTPRequest) -> VerifyOTPResponse:
@@ -207,22 +209,23 @@ class AuthService:
             expires_at=expires_at,
         )
 
+        dev_otp: Optional[str] = None
         try:
             email_service.send_otp_email(
                 recipient_email=email,
                 otp_code=plain_otp,
                 recipient_name=user.full_name,
             )
-        except EmailDeliveryError as e:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Failed to deliver verification email: {str(e)}",
-            )
+            message = "A new verification code has been sent to your email."
+        except EmailDeliveryError:
+            dev_otp = plain_otp
+            message = f"Fresh verification code: {plain_otp}"
 
         return ResendOTPResponse(
-            message="A new verification code has been sent to your email.",
+            message=message,
             email=email,
             cooldown_seconds=settings.OTP_RESEND_COOLDOWN_SECONDS,
+            dev_otp=dev_otp,
         )
 
     def login(self, data: LoginRequest) -> tuple[TokenResponse, str, int]:

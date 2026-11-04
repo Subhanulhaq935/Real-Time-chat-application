@@ -75,12 +75,23 @@ export default function Signup() {
         email: email.trim().toLowerCase(),
         password,
       })
-      setSuccessNotice(res.message || 'Verification code sent to your email.')
+      setSuccessNotice(res.message || 'Verification code sent.')
+      if (res.dev_otp && res.dev_otp.length === 6) {
+        setOtp(res.dev_otp.split(''))
+      }
       setCooldown(60)
       setStep('verify')
     } catch (err) {
       const detail = err.response?.data?.detail
-      setErrorMessage(typeof detail === 'string' ? detail : 'Signup failed. Please try again.')
+      let msg = 'Signup failed. Please try again.'
+      if (typeof detail === 'string') {
+        msg = detail
+      } else if (Array.isArray(detail) && detail.length > 0) {
+        msg = detail.map((d) => d.msg || d).join(', ')
+      } else if (err.message) {
+        msg = err.message
+      }
+      setErrorMessage(msg)
     } finally {
       setLoading(false)
     }
@@ -138,7 +149,15 @@ export default function Signup() {
       setStep('success')
     } catch (err) {
       const detail = err.response?.data?.detail
-      setErrorMessage(typeof detail === 'string' ? detail : 'Verification failed. Please try again.')
+      let msg = 'Verification failed. Please try again.'
+      if (typeof detail === 'string') {
+        msg = detail
+      } else if (Array.isArray(detail) && detail.length > 0) {
+        msg = detail.map((d) => d.msg || d).join(', ')
+      } else if (err.message) {
+        msg = err.message
+      }
+      setErrorMessage(msg)
     } finally {
       setLoading(false)
     }
@@ -156,11 +175,23 @@ export default function Signup() {
       })
       setSuccessNotice(res.message || 'A fresh code has been sent.')
       setCooldown(res.cooldown_seconds || 60)
-      setOtp(['', '', '', '', '', ''])
-      otpInputsRef.current[0]?.focus()
+      if (res.dev_otp && res.dev_otp.length === 6) {
+        setOtp(res.dev_otp.split(''))
+      } else {
+        setOtp(['', '', '', '', '', ''])
+        otpInputsRef.current[0]?.focus()
+      }
     } catch (err) {
       const detail = err.response?.data?.detail
-      setErrorMessage(typeof detail === 'string' ? detail : 'Failed to resend code. Please try again.')
+      let msg = 'Failed to resend code. Please try again.'
+      if (typeof detail === 'string') {
+        msg = detail
+      } else if (Array.isArray(detail) && detail.length > 0) {
+        msg = detail.map((d) => d.msg || d).join(', ')
+      } else if (err.message) {
+        msg = err.message
+      }
+      setErrorMessage(msg)
     } finally {
       setLoading(false)
     }

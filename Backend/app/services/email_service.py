@@ -110,7 +110,7 @@ The {self.from_name} Team
         msg.attach(MIMEText(html_content, "html"))
 
         try:
-            with smtplib.SMTP(self.host, self.port, timeout=10) as server:
+            with smtplib.SMTP(self.host, self.port, timeout=4) as server:
                 server.ehlo()
                 server.starttls()
                 server.ehlo()
