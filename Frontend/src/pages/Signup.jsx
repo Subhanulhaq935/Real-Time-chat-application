@@ -394,10 +394,6 @@ export default function Signup() {
               Your email <strong>{email}</strong> is verified and your account is active.
             </p>
 
-            <div className="success-info-box">
-              <p>Ready for Phase 4: Login &amp; Session Authentication</p>
-            </div>
-
             <button
               type="button"
               className="button button-primary"
