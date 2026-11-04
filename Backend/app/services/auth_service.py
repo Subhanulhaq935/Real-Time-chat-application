@@ -83,23 +83,22 @@ class AuthService:
             expires_at=expires_at,
         )
 
-        # Send OTP via email (with graceful fallback if cloud provider blocks outbound SMTP)
-        dev_otp: Optional[str] = None
+        # Send OTP via email
         try:
             email_service.send_otp_email(
                 recipient_email=email,
                 otp_code=plain_otp,
                 recipient_name=user.full_name,
             )
-            message = f"Verification code sent to {email}. Please verify within {settings.OTP_EXPIRE_MINUTES} minutes."
-        except EmailDeliveryError:
-            dev_otp = plain_otp
-            message = f"Account created! Your verification code is: {plain_otp}"
+        except EmailDeliveryError as e:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Failed to deliver verification email to {email}: {str(e)}",
+            )
 
         return SignupResponse(
-            message=message,
+            message=f"Verification code sent to {email}. Please check your email inbox.",
             email=email,
-            dev_otp=dev_otp,
         )
 
     def verify_otp(self, data: VerifyOTPRequest) -> VerifyOTPResponse:
@@ -209,23 +208,22 @@ class AuthService:
             expires_at=expires_at,
         )
 
-        dev_otp: Optional[str] = None
         try:
             email_service.send_otp_email(
                 recipient_email=email,
                 otp_code=plain_otp,
                 recipient_name=user.full_name,
             )
-            message = "A new verification code has been sent to your email."
-        except EmailDeliveryError:
-            dev_otp = plain_otp
-            message = f"Fresh verification code: {plain_otp}"
+        except EmailDeliveryError as e:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Failed to deliver verification email to {email}: {str(e)}",
+            )
 
         return ResendOTPResponse(
-            message=message,
+            message=f"A fresh verification code has been sent to {email}. Please check your inbox.",
             email=email,
             cooldown_seconds=settings.OTP_RESEND_COOLDOWN_SECONDS,
-            dev_otp=dev_otp,
         )
 
     def login(self, data: LoginRequest) -> tuple[TokenResponse, str, int]:

@@ -29,7 +29,6 @@ class SignupRequest(BaseModel):
 class SignupResponse(BaseModel):
     message: str
     email: str
-    dev_otp: Optional[str] = None
 
 
 class VerifyOTPRequest(BaseModel):
@@ -66,7 +65,6 @@ class ResendOTPResponse(BaseModel):
     message: str
     email: str
     cooldown_seconds: int
-    dev_otp: Optional[str] = None
 
 
 class LoginRequest(BaseModel):

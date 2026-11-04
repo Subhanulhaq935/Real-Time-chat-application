@@ -1,11 +1,15 @@
 import smtplib
+import ssl
+import json
+import urllib.request
+import urllib.error
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from app.core.config import settings
 
 
 class EmailDeliveryError(Exception):
-    """Raised when an email cannot be delivered via SMTP."""
+    """Raised when an email cannot be delivered via SMTP or Email API."""
     pass
 
 
@@ -35,27 +39,84 @@ class EmailService:
         return settings.EMAILS_FROM_NAME
 
     def is_configured(self) -> bool:
-        """Checks if SMTP credentials are configured in the environment."""
-        return bool(self.user and self.password)
+        """Checks if SMTP credentials or Resend API key are configured."""
+        has_smtp = bool(self.user and self.password)
+        has_resend = bool(getattr(settings, "RESEND_API_KEY", "").strip())
+        return has_smtp or has_resend
+
+    def _send_via_resend(self, recipient_email: str, subject: str, html_content: str, text_content: str) -> bool:
+        api_key = getattr(settings, "RESEND_API_KEY", "").strip()
+        if not api_key:
+            return False
+
+        try:
+            from_address = f"{self.from_name} <onboarding@resend.dev>"
+            if self.from_email and not self.from_email.endswith("@gmail.com"):
+                from_address = f"{self.from_name} <{self.from_email}>"
+
+            payload = json.dumps({
+                "from": from_address,
+                "to": [recipient_email],
+                "subject": subject,
+                "html": html_content,
+                "text": text_content,
+            }).encode("utf-8")
+
+            req = urllib.request.Request(
+                "https://api.resend.com/emails",
+                data=payload,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "User-Agent": "PulseChat/1.0",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return resp.status in (200, 201)
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="ignore")
+            raise EmailDeliveryError(f"Resend API error ({e.code}): {err_body}")
+        except Exception as e:
+            raise EmailDeliveryError(f"Resend delivery failed: {str(e)}")
+
+    def _send_via_smtp(self, recipient_email: str, msg: MIMEMultipart) -> None:
+        clean_user = self.user.strip()
+        clean_password = self.password.replace(" ", "").strip()
+        clean_host = self.host.strip()
+
+        # Try Port 465 (SSL) and Port 587 (STARTTLS)
+        ports_to_try = [465, 587] if self.port == 465 else [587, 465]
+        attempt_errors = []
+
+        for p in ports_to_try:
+            try:
+                if p == 465:
+                    ctx = ssl.create_default_context()
+                    with smtplib.SMTP_SSL(clean_host, 465, timeout=8, context=ctx) as server:
+                        server.login(clean_user, clean_password)
+                        server.sendmail(self.from_email, [recipient_email], msg.as_string())
+                        return
+                else:
+                    with smtplib.SMTP(clean_host, 587, timeout=8) as server:
+                        server.ehlo()
+                        server.starttls()
+                        server.ehlo()
+                        server.login(clean_user, clean_password)
+                        server.sendmail(self.from_email, [recipient_email], msg.as_string())
+                        return
+            except smtplib.SMTPAuthenticationError as auth_err:
+                raise EmailDeliveryError("SMTP Authentication failed: Please verify your Gmail address and 16-character App Password.")
+            except Exception as e:
+                attempt_errors.append(f"Port {p}: {type(e).__name__} ({str(e)})")
+
+        raise EmailDeliveryError(f"Failed to connect to SMTP server: {'; '.join(attempt_errors)}")
 
     def send_otp_email(self, recipient_email: str, otp_code: str, recipient_name: str = "User") -> None:
         """
         Sends an email containing the 6-digit OTP code to the recipient.
-        Uses Gmail SMTP with STARTTLS.
+        Tries Resend HTTPS API first if configured, then Gmail SMTP (ports 587 & 465).
         """
-        if not self.is_configured():
-            # In development mode without credentials, print the code to the terminal for easy testing
-            print(
-                f"\n"
-                f"======================================================\n"
-                f" [DEV MODE] SMTP CREDENTIALS NOT CONFIGURED IN .env\n"
-                f" Recipient: {recipient_email}\n"
-                f" Verification OTP Code: >>> {otp_code} <<<\n"
-                f" (Enter this code in your browser to verify your account)\n"
-                f"======================================================\n"
-            )
-            return
-
         subject = f"Your Verification Code: {otp_code} - {self.from_name}"
 
         # Plain text fallback
@@ -101,6 +162,16 @@ The {self.from_name} Team
 </html>
 """
 
+        # 1. Try Resend API if API key is provided
+        if getattr(settings, "RESEND_API_KEY", "").strip():
+            if self._send_via_resend(recipient_email, subject, html_content, text_content):
+                return
+
+        # 2. Check SMTP credentials
+        if not (self.user and self.password):
+            raise EmailDeliveryError("Email delivery service is not configured. Please check SMTP settings in server configuration.")
+
+        # 3. Deliver via SMTP (with 465 SSL & 587 STARTTLS auto-fallback)
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
         msg["From"] = f"{self.from_name} <{self.from_email}>"
@@ -109,18 +180,7 @@ The {self.from_name} Team
         msg.attach(MIMEText(text_content, "plain"))
         msg.attach(MIMEText(html_content, "html"))
 
-        try:
-            with smtplib.SMTP(self.host, self.port, timeout=4) as server:
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
-                server.login(self.user, self.password)
-                server.sendmail(self.from_email, [recipient_email], msg.as_string())
-        except smtplib.SMTPException as e:
-            # Raise a custom exception without exposing SMTP credentials in the error trace
-            raise EmailDeliveryError(f"Failed to send email via SMTP: {type(e).__name__}")
-        except Exception as e:
-            raise EmailDeliveryError(f"Unexpected email delivery failure: {type(e).__name__}")
+        self._send_via_smtp(recipient_email, msg)
 
 
 email_service = EmailService()

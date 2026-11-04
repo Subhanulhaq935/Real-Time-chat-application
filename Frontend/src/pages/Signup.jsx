@@ -75,11 +75,9 @@ export default function Signup() {
         email: email.trim().toLowerCase(),
         password,
       })
-      setSuccessNotice(res.message || 'Verification code sent.')
-      if (res.dev_otp && res.dev_otp.length === 6) {
-        setOtp(res.dev_otp.split(''))
-      }
+      setSuccessNotice(res.message || 'Verification code sent to your email.')
       setCooldown(60)
+      setOtp(['', '', '', '', '', ''])
       setStep('verify')
     } catch (err) {
       const detail = err.response?.data?.detail
@@ -173,14 +171,10 @@ export default function Signup() {
       const res = await resendOtp({
         email: email.trim().toLowerCase(),
       })
-      setSuccessNotice(res.message || 'A fresh code has been sent.')
+      setSuccessNotice(res.message || 'A fresh code has been sent to your email.')
       setCooldown(res.cooldown_seconds || 60)
-      if (res.dev_otp && res.dev_otp.length === 6) {
-        setOtp(res.dev_otp.split(''))
-      } else {
-        setOtp(['', '', '', '', '', ''])
-        otpInputsRef.current[0]?.focus()
-      }
+      setOtp(['', '', '', '', '', ''])
+      otpInputsRef.current[0]?.focus()
     } catch (err) {
       const detail = err.response?.data?.detail
       let msg = 'Failed to resend code. Please try again.'
