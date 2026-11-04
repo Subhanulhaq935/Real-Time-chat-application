@@ -133,6 +133,9 @@ export default function Chat() {
         })
       })
 
+      // Warm the message cache for the most recent chats so they open instantly
+      data.slice(0, 8).forEach((c) => prefetchMessages(c.id))
+
       if (!silent) {
         const targetId = searchParams.get('id')
         if (targetId) {
@@ -279,12 +282,40 @@ export default function Chat() {
   }, [user?.id])
 
   // 2. Fetch Messages History when Active Conversation Changes
+  // In-memory cache so opening a chat shows messages instantly (stale-while-revalidate)
+  const messagesCacheRef = useRef({})
+  const prefetchingRef = useRef(new Set())
+
+  const prefetchMessages = (conversationId) => {
+    if (messagesCacheRef.current[conversationId] || prefetchingRef.current.has(conversationId)) return
+    prefetchingRef.current.add(conversationId)
+    getChatMessages(conversationId)
+      .then((res) => {
+        if (!messagesCacheRef.current[conversationId]) {
+          messagesCacheRef.current[conversationId] = res.messages || []
+        }
+      })
+      .catch(() => {})
+      .finally(() => prefetchingRef.current.delete(conversationId))
+  }
+
   const loadMessages = async (conversationId) => {
-    setLoadingMessages(true)
+    const cached = messagesCacheRef.current[conversationId]
+    if (cached) {
+      setMessages(cached)
+      setLoadingMessages(false)
+    } else {
+      setMessages([])
+      setLoadingMessages(true)
+    }
     try {
       const res = await getChatMessages(conversationId)
       const list = res.messages || []
-      setMessages(list)
+      messagesCacheRef.current[conversationId] = list
+      // Only apply if user is still viewing this conversation
+      if (activeConvRef.current?.id === conversationId) {
+        setMessages(list)
+      }
 
       const hasUnread = list.some((m) => !m.is_mine && !m.is_read)
       if (hasUnread) {
@@ -293,7 +324,7 @@ export default function Chat() {
     } catch (err) {
       console.error('Failed to load messages:', err)
     } finally {
-      setLoadingMessages(false)
+      if (activeConvRef.current?.id === conversationId) setLoadingMessages(false)
     }
   }
 
@@ -304,6 +335,15 @@ export default function Chat() {
       setMessages([])
     }
   }, [activeConv?.id])
+
+  // Keep cache in sync with live changes (new/edited/deleted/reacted messages)
+  useEffect(() => {
+    const id = activeConv?.id
+    if (!id || loadingMessages) return
+    if (messages.length === 0 || messages[0].conversation_id === id) {
+      messagesCacheRef.current[id] = messages.filter((m) => !String(m.id).startsWith('temp'))
+    }
+  }, [messages])
 
   // Auto-scroll to bottom on new message
   useEffect(() => {
