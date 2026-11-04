@@ -64,16 +64,23 @@ export const AuthProvider = ({ children }) => {
     return data
   }
 
-  const logout = async () => {
+  const logout = () => {
+    // 1. Instant optimistic local session cleanup (0ms response)
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('cached_user')
     try {
-      await logoutUser()
-    } catch (err) {
-      console.warn('Logout API notice:', err)
-    } finally {
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('cached_user')
-      setUser(null)
-    }
+      Object.keys(localStorage).forEach((k) => {
+        if (k.startsWith('chat_conversations_') || k.startsWith('chat_messages_')) {
+          localStorage.removeItem(k)
+        }
+      })
+    } catch {}
+    setUser(null)
+
+    // 2. Fire-and-forget server revocation & cookie clearance in background
+    logoutUser().catch((err) => {
+      console.warn('Background logout notice:', err)
+    })
   }
 
   return (

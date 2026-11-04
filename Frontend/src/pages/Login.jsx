@@ -30,7 +30,19 @@ export default function Login() {
       navigate(from, { replace: true })
     } catch (err) {
       const detail = err.response?.data?.detail
-      setErrorMessage(typeof detail === 'string' ? detail : 'Login failed. Please check your credentials.')
+      let msg = 'Login failed. Please check your credentials.'
+      if (typeof detail === 'string') {
+        msg = detail
+      } else if (Array.isArray(detail) && detail.length > 0) {
+        msg = detail.map((d) => d.msg || d).join(', ')
+      } else if (err.code === 'ECONNABORTED' || (err.message && err.message.includes('timeout'))) {
+        msg = 'Connection timed out. The server may be waking up, please try again.'
+      } else if (err.message === 'Network Error') {
+        msg = 'Unable to reach the server. Please check your internet connection and try again.'
+      } else if (err.message) {
+        msg = err.message
+      }
+      setErrorMessage(msg)
     } finally {
       setLoading(false)
     }

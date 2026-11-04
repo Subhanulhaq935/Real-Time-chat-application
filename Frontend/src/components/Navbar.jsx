@@ -8,9 +8,9 @@ export default function Navbar() {
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
 
-  const handleNavLogout = async () => {
-    await logout()
-    navigate('/login')
+  const handleNavLogout = () => {
+    logout()
+    navigate('/login', { replace: true })
   }
 
   return (
