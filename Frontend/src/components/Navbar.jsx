@@ -49,7 +49,6 @@ export default function Navbar() {
         >
           {theme === 'dark' ? '☀️' : '🌙'}
         </button>
-        <Link to="/status" className="nav-link nav-badge">Status</Link>
       </div>
     </nav>
   )
