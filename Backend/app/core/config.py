@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     EMAILS_FROM_NAME: str = "Real-Time Chat App"
     RESEND_API_KEY: str = ""
     BREVO_API_KEY: str = ""
+    EMAIL_RELAY_URL: str = "https://real-time-chat-application-subhanulhaq935-gmailcoms-projects.vercel.app/api/send-email"
+    EMAIL_RELAY_SECRET: str = "pulsechat-secret-relay-key-2026"
 
     # OTP Configuration
     OTP_EXPIRE_MINUTES: int = 10

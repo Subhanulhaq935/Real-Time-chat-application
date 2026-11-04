@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Response, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -34,9 +34,11 @@ def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
 )
 def signup(
     data: SignupRequest,
+    request: Request,
     auth_service: AuthService = Depends(get_auth_service),
 ):
-    return auth_service.signup(data)
+    client_origin = request.headers.get("origin") or request.headers.get("referer")
+    return auth_service.signup(data, client_origin=client_origin)
 
 
 @router.post(
@@ -60,9 +62,11 @@ def verify_otp(
 )
 def resend_otp(
     data: ResendOTPRequest,
+    request: Request,
     auth_service: AuthService = Depends(get_auth_service),
 ):
-    return auth_service.resend_otp(data)
+    client_origin = request.headers.get("origin") or request.headers.get("referer")
+    return auth_service.resend_otp(data, client_origin=client_origin)
 
 
 @router.post(

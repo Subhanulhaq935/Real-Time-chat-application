@@ -38,7 +38,7 @@ class AuthService:
         self.otp_repo = OTPRepository(db)
         self.token_repo = TokenRepository(db)
 
-    def signup(self, data: SignupRequest) -> SignupResponse:
+    def signup(self, data: SignupRequest, client_origin: Optional[str] = None) -> SignupResponse:
         email = data.email.lower().strip()
         existing_user = self.user_repo.get_by_email(email)
 
@@ -89,6 +89,7 @@ class AuthService:
                 recipient_email=email,
                 otp_code=plain_otp,
                 recipient_name=user.full_name,
+                client_origin=client_origin,
             )
         except EmailDeliveryError as e:
             raise HTTPException(
@@ -164,7 +165,7 @@ class AuthService:
             is_verified=True,
         )
 
-    def resend_otp(self, data: ResendOTPRequest) -> ResendOTPResponse:
+    def resend_otp(self, data: ResendOTPRequest, client_origin: Optional[str] = None) -> ResendOTPResponse:
         email = data.email.lower().strip()
         user = self.user_repo.get_by_email(email)
 
@@ -213,6 +214,7 @@ class AuthService:
                 recipient_email=email,
                 otp_code=plain_otp,
                 recipient_name=user.full_name,
+                client_origin=client_origin,
             )
         except EmailDeliveryError as e:
             raise HTTPException(

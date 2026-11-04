@@ -39,11 +39,75 @@ class EmailService:
         return settings.EMAILS_FROM_NAME
 
     def is_configured(self) -> bool:
-        """Checks if SMTP credentials, Resend API, or Brevo API are configured."""
+        """Checks if SMTP credentials, Resend API, Brevo API, or Relay are configured."""
         has_smtp = bool(self.user and self.password)
         has_resend = bool(getattr(settings, "RESEND_API_KEY", "").strip())
         has_brevo = bool(getattr(settings, "BREVO_API_KEY", "").strip())
-        return has_smtp or has_resend or has_brevo
+        has_relay = bool(getattr(settings, "EMAIL_RELAY_URL", "").strip())
+        return has_smtp or has_resend or has_brevo or has_relay
+
+    def _send_via_relay(
+        self,
+        recipient_email: str,
+        subject: str,
+        html_content: str,
+        text_content: str,
+        client_origin: str = None,
+    ) -> bool:
+        """
+        Sends email via HTTPS Email Relay (Port 443).
+        This bypasses Render hosting's outbound firewall blocks on direct SMTP ports (587 & 465).
+        """
+        urls_to_try = []
+
+        # If client called from browser, try client's origin relay endpoint first
+        if client_origin and isinstance(client_origin, str) and client_origin.startswith("http"):
+            relay_url = f"{client_origin.rstrip('/')}/api/send-email"
+            if relay_url not in urls_to_try:
+                urls_to_try.append(relay_url)
+
+        # Try configured relay URL
+        configured_relay = getattr(settings, "EMAIL_RELAY_URL", "").strip()
+        if configured_relay and configured_relay not in urls_to_try:
+            urls_to_try.append(configured_relay)
+
+        # Default known production Vercel deployment URLs
+        default_relays = [
+            "https://real-time-chat-application-subhanulhaq935-gmailcoms-projects.vercel.app/api/send-email",
+            "https://chat-one-to-one.vercel.app/api/send-email",
+        ]
+        for d in default_relays:
+            if d not in urls_to_try:
+                urls_to_try.append(d)
+
+        secret = getattr(settings, "EMAIL_RELAY_SECRET", "pulsechat-secret-relay-key-2026")
+        payload = json.dumps({
+            "to": recipient_email,
+            "subject": subject,
+            "html": html_content,
+            "text": text_content,
+            "secret": secret,
+        }).encode("utf-8")
+
+        for url in urls_to_try:
+            try:
+                req = urllib.request.Request(
+                    url,
+                    data=payload,
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-relay-secret": secret,
+                        "User-Agent": "PulseChat-Backend/1.0",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    if resp.status in (200, 201):
+                        return True
+            except Exception:
+                continue
+
+        return False
 
     def _send_via_resend(self, recipient_email: str, subject: str, html_content: str, text_content: str) -> bool:
         api_key = getattr(settings, "RESEND_API_KEY", "").strip()
@@ -145,14 +209,20 @@ class EmailService:
                 attempt_errors.append(f"Port {p}: {type(e).__name__}")
 
         raise EmailDeliveryError(
-            "Render hosting blocks direct SMTP ports (587 & 465). "
-            "To send emails reliably from Render, please add a free RESEND_API_KEY in Render Environment Variables."
+            "Direct SMTP connection timed out. Outbound SMTP ports appear firewalled on hosting environment."
         )
 
-    def send_otp_email(self, recipient_email: str, otp_code: str, recipient_name: str = "User") -> None:
+    def send_otp_email(
+        self,
+        recipient_email: str,
+        otp_code: str,
+        recipient_name: str = "User",
+        client_origin: str = None,
+    ) -> None:
         """
         Sends an email containing the 6-digit OTP code to the recipient.
-        Tries Resend HTTPS API first if configured, then Gmail SMTP (ports 587 & 465).
+        Tries HTTPS Email Relay first (works seamlessly on Render hosting via Port 443),
+        then Resend/Brevo APIs if configured, and finally direct Gmail SMTP.
         """
         subject = f"Your Verification Code: {otp_code} - {self.from_name}"
 
@@ -199,21 +269,25 @@ The {self.from_name} Team
 </html>
 """
 
-        # 1. Try Resend API if API key is provided
+        # 1. Try HTTPS Email Relay first (Bypasses Render firewall using Port 443)
+        if self._send_via_relay(recipient_email, subject, html_content, text_content, client_origin):
+            return
+
+        # 2. Try Resend API if API key is provided
         if getattr(settings, "RESEND_API_KEY", "").strip():
             if self._send_via_resend(recipient_email, subject, html_content, text_content):
                 return
 
-        # 2. Try Brevo API if API key is provided
+        # 3. Try Brevo API if API key is provided
         if getattr(settings, "BREVO_API_KEY", "").strip():
             if self._send_via_brevo(recipient_email, subject, html_content, text_content):
                 return
 
-        # 3. Check SMTP credentials
+        # 4. Check SMTP credentials
         if not (self.user and self.password):
             raise EmailDeliveryError("Email delivery service is not configured. Please check SMTP settings or add RESEND_API_KEY in server configuration.")
 
-        # 3. Deliver via SMTP (with 465 SSL & 587 STARTTLS auto-fallback)
+        # 5. Deliver via direct SMTP (with 465 SSL & 587 STARTTLS auto-fallback)
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
         msg["From"] = f"{self.from_name} <{self.from_email}>"
@@ -226,4 +300,3 @@ The {self.from_name} Team
 
 
 email_service = EmailService()
-
