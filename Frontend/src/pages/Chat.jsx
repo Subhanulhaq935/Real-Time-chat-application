@@ -15,17 +15,74 @@ import EmojiPicker from '../components/EmojiPicker'
 import MessageReactionBar from '../components/MessageReactionBar'
 import VoiceRecorderBar from '../components/VoiceRecorderBar'
 
+// LocalStorage helpers for 0ms instant loading
+const CONV_CACHE_KEY = (uid) => `chat_conversations_v2_${uid || 'me'}`
+const MSG_CACHE_KEY = (convId) => `chat_messages_v2_${convId}`
+
+const getStoredConvs = (uid) => {
+  try {
+    const raw = localStorage.getItem(CONV_CACHE_KEY(uid))
+    return raw ? JSON.parse(raw) : []
+  } catch {
+    return []
+  }
+}
+
+const saveStoredConvs = (uid, list) => {
+  if (!Array.isArray(list)) return
+  try {
+    localStorage.setItem(CONV_CACHE_KEY(uid), JSON.stringify(list))
+  } catch {}
+}
+
+const getStoredMessages = (convId) => {
+  if (!convId) return null
+  try {
+    const raw = localStorage.getItem(MSG_CACHE_KEY(convId))
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+const saveStoredMessages = (convId, list) => {
+  if (!convId || !Array.isArray(list)) return
+  try {
+    const clean = list.slice(-100).filter((m) => !String(m.id).startsWith('temp-'))
+    localStorage.setItem(MSG_CACHE_KEY(convId), JSON.stringify(clean))
+  } catch (e) {
+    try {
+      const keys = Object.keys(localStorage).filter((k) => k.startsWith('chat_messages_v2_'))
+      if (keys.length > 30) {
+        keys.slice(0, 15).forEach((k) => localStorage.removeItem(k))
+      }
+    } catch {}
+  }
+}
+
 export default function Chat() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const [conversations, setConversations] = useState([])
-  const [loadingChats, setLoadingChats] = useState(true)
-  const [activeConv, setActiveConv] = useState(null)
+  const targetConvId = searchParams.get('id')
+  const initialCachedConvs = useMemo(() => getStoredConvs(user?.id), [user?.id])
+  const initialTargetConv = useMemo(() => {
+    if (!targetConvId) return null
+    return initialCachedConvs.find((c) => c.id === targetConvId) || null
+  }, [targetConvId, initialCachedConvs])
+  const initialCachedMsgs = useMemo(() => {
+    return initialTargetConv ? (getStoredMessages(initialTargetConv.id) || []) : []
+  }, [initialTargetConv])
 
-  const [messages, setMessages] = useState([])
-  const [loadingMessages, setLoadingMessages] = useState(false)
+  const [conversations, setConversations] = useState(initialCachedConvs)
+  const [loadingChats, setLoadingChats] = useState(initialCachedConvs.length === 0)
+  const [activeConv, setActiveConv] = useState(initialTargetConv)
+
+  const [messages, setMessages] = useState(initialCachedMsgs)
+  const [loadingMessages, setLoadingMessages] = useState(
+    Boolean(initialTargetConv && initialCachedMsgs.length === 0)
+  )
   const [inputText, setInputText] = useState('')
 
   // Advanced features states
@@ -119,10 +176,41 @@ export default function Chat() {
     }
   }
 
+  // Keep cached conversations updated in localStorage whenever conversations change
+  useEffect(() => {
+    if (conversations && conversations.length > 0) {
+      saveStoredConvs(user?.id, conversations)
+    }
+  }, [conversations, user?.id])
+
+  // Hydrate from localStorage once user?.id is resolved if initial state was empty
+  useEffect(() => {
+    if (user?.id && conversations.length === 0) {
+      const stored = getStoredConvs(user.id)
+      if (stored && stored.length > 0) {
+        setConversations(stored)
+        setLoadingChats(false)
+        const targetId = searchParams.get('id')
+        if (targetId && !activeConvRef.current) {
+          const found = stored.find((c) => c.id === targetId)
+          if (found) {
+            setActiveConv(found)
+            const msgs = getStoredMessages(found.id)
+            if (msgs) {
+              setMessages(msgs)
+              setLoadingMessages(false)
+            }
+          }
+        }
+      }
+    }
+  }, [user?.id])
+
   // 1. Fetch Conversations List
   const loadConversations = async (silent = false) => {
     try {
       const data = await getChatsList()
+      saveStoredConvs(user?.id, data)
       setConversations((prev) => {
         const currentActiveId = activeConvRef.current?.id
         return data.map((conv) => {
@@ -133,14 +221,14 @@ export default function Chat() {
         })
       })
 
-      // Warm the message cache for the most recent chats so they open instantly
-      data.slice(0, 8).forEach((c) => prefetchMessages(c.id))
+      // Warm the message cache for recent chats so they open in 0ms!
+      data.slice(0, 10).forEach((c) => prefetchMessages(c.id))
 
       if (!silent) {
         const targetId = searchParams.get('id')
         if (targetId) {
           const found = data.find((c) => c.id === targetId)
-          if (found) {
+          if (found && !activeConvRef.current) {
             setActiveConv(found)
             setShowMobileList(false)
           }
@@ -224,6 +312,17 @@ export default function Chat() {
             )
             const currentActiveId = activeConvRef.current?.id
 
+            // Also update the cached messages for this conversation so it opens with this new message in 0ms
+            const convId = newMsg.conversation_id
+            const existingCache = messagesCacheRef.current[convId] || getStoredMessages(convId)
+            if (existingCache && Array.isArray(existingCache)) {
+              if (!existingCache.some((m) => m.id === newMsg.id)) {
+                const updatedCache = [...existingCache, newMsg]
+                messagesCacheRef.current[convId] = updatedCache
+                saveStoredMessages(convId, updatedCache)
+              }
+            }
+
             setConversations((prev) => {
               const exists = prev.some((c) => c.id === newMsg.conversation_id)
               if (!exists) {
@@ -282,36 +381,46 @@ export default function Chat() {
   }, [user?.id])
 
   // 2. Fetch Messages History when Active Conversation Changes
-  // In-memory cache so opening a chat shows messages instantly (stale-while-revalidate)
+  // In-memory + LocalStorage cache so opening any chat shows messages in 0ms (instant appearance)
   const messagesCacheRef = useRef({})
   const prefetchingRef = useRef(new Set())
 
   const prefetchMessages = (conversationId) => {
     if (messagesCacheRef.current[conversationId] || prefetchingRef.current.has(conversationId)) return
+    const stored = getStoredMessages(conversationId)
+    if (stored && stored.length > 0) {
+      messagesCacheRef.current[conversationId] = stored
+      return
+    }
     prefetchingRef.current.add(conversationId)
     getChatMessages(conversationId)
       .then((res) => {
-        if (!messagesCacheRef.current[conversationId]) {
-          messagesCacheRef.current[conversationId] = res.messages || []
-        }
+        const list = res.messages || []
+        messagesCacheRef.current[conversationId] = list
+        saveStoredMessages(conversationId, list)
       })
       .catch(() => {})
       .finally(() => prefetchingRef.current.delete(conversationId))
   }
 
   const loadMessages = async (conversationId) => {
-    const cached = messagesCacheRef.current[conversationId]
-    if (cached) {
-      setMessages(cached)
-      setLoadingMessages(false)
-    } else {
-      setMessages([])
+    const cached = messagesCacheRef.current[conversationId] || getStoredMessages(conversationId)
+    if (cached && cached.length > 0) {
+      messagesCacheRef.current[conversationId] = cached
+      if (activeConvRef.current?.id === conversationId) {
+        setMessages(cached)
+        setLoadingMessages(false)
+      }
+    } else if (activeConvRef.current?.id === conversationId) {
       setLoadingMessages(true)
     }
+
     try {
       const res = await getChatMessages(conversationId)
       const list = res.messages || []
       messagesCacheRef.current[conversationId] = list
+      saveStoredMessages(conversationId, list)
+
       // Only apply if user is still viewing this conversation
       if (activeConvRef.current?.id === conversationId) {
         setMessages(list)
@@ -340,10 +449,12 @@ export default function Chat() {
   useEffect(() => {
     const id = activeConv?.id
     if (!id || loadingMessages) return
-    if (messages.length === 0 || messages[0].conversation_id === id) {
-      messagesCacheRef.current[id] = messages.filter((m) => !String(m.id).startsWith('temp'))
+    if (messages.length === 0 || messages[0]?.conversation_id === id) {
+      const cleanList = messages.filter((m) => !String(m.id).startsWith('temp'))
+      messagesCacheRef.current[id] = cleanList
+      saveStoredMessages(id, cleanList)
     }
-  }, [messages])
+  }, [messages, activeConv?.id, loadingMessages])
 
   // Auto-scroll to bottom on new message
   useEffect(() => {
@@ -876,6 +987,17 @@ export default function Chat() {
 
   // Switch Conversation
   const handleSelectConv = (conv) => {
+    // 0ms instant display of cached messages
+    const cached = messagesCacheRef.current[conv.id] || getStoredMessages(conv.id)
+    if (cached && cached.length > 0) {
+      messagesCacheRef.current[conv.id] = cached
+      setMessages(cached)
+      setLoadingMessages(false)
+    } else {
+      setMessages([])
+      setLoadingMessages(true)
+    }
+
     setActiveConv(conv)
     setSearchParams({ id: conv.id })
     setShowMobileList(false)
