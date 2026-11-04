@@ -1260,7 +1260,8 @@ body {
   line-height: 1;
 }
 
-.message-ticks.ticks-sent {
+.message-ticks.ticks-sent,
+.message-ticks.ticks-delivered {
   color: var(--tick-sent);
 }
 

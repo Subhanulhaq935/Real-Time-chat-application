@@ -573,13 +573,30 @@ export default function Chat() {
 
           // 3. Message read receipts
           if (payload.type === 'messages_read' && payload.conversation_id === activeConv.id) {
+            const readerId = payload.reader_id ? String(payload.reader_id).toLowerCase() : null
+            const currentUserId = user?.id ? String(user.id).toLowerCase() : null
+
+            // If the reader was the OTHER participant in this chat,
+            // that means THEY read MY sent messages!
+            const otherPersonReadMyMessages = Boolean(readerId && currentUserId && readerId !== currentUserId)
+
             setMessages((prev) =>
               prev.map((m) => {
                 const isMine = Boolean(
                   m.is_mine === true ||
-                  (user?.id && String(m.sender_id).toLowerCase() === String(user.id).toLowerCase())
+                  (currentUserId && String(m.sender_id).toLowerCase() === currentUserId)
                 )
-                return isMine ? { ...m, is_read: true } : m
+
+                if (otherPersonReadMyMessages && isMine) {
+                  return { ...m, is_read: true }
+                }
+
+                // If I am the reader, mark the other person's incoming messages as read
+                if (!otherPersonReadMyMessages && !isMine) {
+                  return { ...m, is_read: true }
+                }
+
+                return m
               })
             )
           }
@@ -1372,10 +1389,22 @@ export default function Chat() {
 
                           {isMine && !isDeleted && (
                             <span
-                              className={`message-ticks ${m.is_read ? 'ticks-read' : 'ticks-sent'}`}
-                              title={m.is_read ? 'Seen' : 'Sent'}
+                              className={`message-ticks ${
+                                m.is_read
+                                  ? 'ticks-read'
+                                  : otherParticipant?.is_online
+                                  ? 'ticks-delivered'
+                                  : 'ticks-sent'
+                              }`}
+                              title={
+                                m.is_read
+                                  ? 'Seen'
+                                  : otherParticipant?.is_online
+                                  ? 'Delivered'
+                                  : 'Sent'
+                              }
                             >
-                              {m.is_read ? '✓✓' : '✓'}
+                              {m.is_read ? '✓✓' : otherParticipant?.is_online ? '✓✓' : '✓'}
                             </span>
                           )}
 
