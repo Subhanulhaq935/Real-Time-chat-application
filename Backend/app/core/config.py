@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     EMAILS_FROM_EMAIL: str = ""
     EMAILS_FROM_NAME: str = "Real-Time Chat App"
     RESEND_API_KEY: str = ""
+    BREVO_API_KEY: str = ""
 
     # OTP Configuration
     OTP_EXPIRE_MINUTES: int = 10

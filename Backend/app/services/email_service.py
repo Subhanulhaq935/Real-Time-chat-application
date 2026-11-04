@@ -39,10 +39,11 @@ class EmailService:
         return settings.EMAILS_FROM_NAME
 
     def is_configured(self) -> bool:
-        """Checks if SMTP credentials or Resend API key are configured."""
+        """Checks if SMTP credentials, Resend API, or Brevo API are configured."""
         has_smtp = bool(self.user and self.password)
         has_resend = bool(getattr(settings, "RESEND_API_KEY", "").strip())
-        return has_smtp or has_resend
+        has_brevo = bool(getattr(settings, "BREVO_API_KEY", "").strip())
+        return has_smtp or has_resend or has_brevo
 
     def _send_via_resend(self, recipient_email: str, subject: str, html_content: str, text_content: str) -> bool:
         api_key = getattr(settings, "RESEND_API_KEY", "").strip()
@@ -80,12 +81,45 @@ class EmailService:
         except Exception as e:
             raise EmailDeliveryError(f"Resend delivery failed: {str(e)}")
 
+    def _send_via_brevo(self, recipient_email: str, subject: str, html_content: str, text_content: str) -> bool:
+        api_key = getattr(settings, "BREVO_API_KEY", "").strip()
+        if not api_key:
+            return False
+
+        try:
+            from_email = self.from_email if self.from_email else self.user
+            payload = json.dumps({
+                "sender": {"name": self.from_name, "email": from_email},
+                "to": [{"email": recipient_email}],
+                "subject": subject,
+                "htmlContent": html_content,
+                "textContent": text_content,
+            }).encode("utf-8")
+
+            req = urllib.request.Request(
+                "https://api.brevo.com/v3/smtp/email",
+                data=payload,
+                headers={
+                    "api-key": api_key,
+                    "Content-Type": "application/json",
+                    "User-Agent": "PulseChat/1.0",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return resp.status in (200, 201)
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="ignore")
+            raise EmailDeliveryError(f"Brevo API error ({e.code}): {err_body}")
+        except Exception as e:
+            raise EmailDeliveryError(f"Brevo delivery failed: {str(e)}")
+
     def _send_via_smtp(self, recipient_email: str, msg: MIMEMultipart) -> None:
         clean_user = self.user.strip()
         clean_password = self.password.replace(" ", "").strip()
         clean_host = self.host.strip()
 
-        # Try Port 465 (SSL) and Port 587 (STARTTLS)
+        # Try Port 465 (SSL) and Port 587 (STARTTLS) with 3s timeout to fail fast if firewall drops packets
         ports_to_try = [465, 587] if self.port == 465 else [587, 465]
         attempt_errors = []
 
@@ -93,24 +127,27 @@ class EmailService:
             try:
                 if p == 465:
                     ctx = ssl.create_default_context()
-                    with smtplib.SMTP_SSL(clean_host, 465, timeout=8, context=ctx) as server:
+                    with smtplib.SMTP_SSL(clean_host, 465, timeout=3, context=ctx) as server:
                         server.login(clean_user, clean_password)
                         server.sendmail(self.from_email, [recipient_email], msg.as_string())
                         return
                 else:
-                    with smtplib.SMTP(clean_host, 587, timeout=8) as server:
+                    with smtplib.SMTP(clean_host, 587, timeout=3) as server:
                         server.ehlo()
                         server.starttls()
                         server.ehlo()
                         server.login(clean_user, clean_password)
                         server.sendmail(self.from_email, [recipient_email], msg.as_string())
                         return
-            except smtplib.SMTPAuthenticationError as auth_err:
-                raise EmailDeliveryError("SMTP Authentication failed: Please verify your Gmail address and 16-character App Password.")
+            except smtplib.SMTPAuthenticationError:
+                raise EmailDeliveryError("Gmail SMTP Authentication failed. Please verify your Gmail address and 16-character App Password.")
             except Exception as e:
-                attempt_errors.append(f"Port {p}: {type(e).__name__} ({str(e)})")
+                attempt_errors.append(f"Port {p}: {type(e).__name__}")
 
-        raise EmailDeliveryError(f"Failed to connect to SMTP server: {'; '.join(attempt_errors)}")
+        raise EmailDeliveryError(
+            "Render hosting blocks direct SMTP ports (587 & 465). "
+            "To send emails reliably from Render, please add a free RESEND_API_KEY in Render Environment Variables."
+        )
 
     def send_otp_email(self, recipient_email: str, otp_code: str, recipient_name: str = "User") -> None:
         """
@@ -167,9 +204,14 @@ The {self.from_name} Team
             if self._send_via_resend(recipient_email, subject, html_content, text_content):
                 return
 
-        # 2. Check SMTP credentials
+        # 2. Try Brevo API if API key is provided
+        if getattr(settings, "BREVO_API_KEY", "").strip():
+            if self._send_via_brevo(recipient_email, subject, html_content, text_content):
+                return
+
+        # 3. Check SMTP credentials
         if not (self.user and self.password):
-            raise EmailDeliveryError("Email delivery service is not configured. Please check SMTP settings in server configuration.")
+            raise EmailDeliveryError("Email delivery service is not configured. Please check SMTP settings or add RESEND_API_KEY in server configuration.")
 
         # 3. Deliver via SMTP (with 465 SSL & 587 STARTTLS auto-fallback)
         msg = MIMEMultipart("alternative")
